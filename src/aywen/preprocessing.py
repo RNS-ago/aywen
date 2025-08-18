@@ -238,9 +238,8 @@ def convert_and_add_date_time_columns(df: pd.DataFrame, date_column: str = "INIC
     try:
         df.loc[:, date_column] = pd.to_datetime(df[date_column].astype(str).str.strip(), format="%Y-%m-%d %H:%M", errors="coerce")
         df[date_column] = df[date_column].astype('datetime64[ns]')
-        print(df[date_column].dtype)
-        df.loc[:, f"DIA_{date_column}"] = df[date_column].dt.date
-        df.loc[:, f"HORA_{date_column}"] = df[date_column].dt.hour
+        df[f"DIA_{date_column}"] = df[date_column].dt.date
+        df[f"HORA_{date_column}"] = df[date_column].dt.hour
     except Exception:
         logger.exception("\tFailed to convert %s to datetime.", date_column)
         raise
@@ -319,6 +318,7 @@ def standardize_dispatch_reports_ID_and_fliter(
     
     # --- Filter ---
     try:
+        df = df.copy()
         # Filter by report type
         if filter_report_types:
             df = df[df[report_type_column].isin(selected_report_types)]
