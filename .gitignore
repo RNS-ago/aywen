@@ -10,4 +10,10 @@ wheels/
 .venv
 
 # Test output
-testing/test_preprocessed_data/
+testing/
+
+*.csv
+*.shp
+*.shx
+*.dbf
+*.cpg
