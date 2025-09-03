@@ -97,7 +97,7 @@ def load_datasets(
     return dfs
 
 
-def check_dataset_compatibility(
+def check_dataset_compatibility(    
     dfs: list[pd.DataFrame], 
     check_matching_columns: bool = False,
     check_unique_rows: bool = False, 
@@ -705,13 +705,13 @@ def normalize_and_validate_surface_area_data(fire_df: pd.DataFrame) -> pd.DataFr
         df.loc[:, 'final_surface_ha'] = df['final_surface_ha'].str.replace('m2', '').str.replace('.', '').str.replace(',', '.').astype(float)
 
     # Validate surface area data
-    if (df['initial_surface_ha'].dropna() < 0).all():
+    if (df['initial_surface_ha'].dropna() < 0).any():
         raise ValueError("Initial surface area has negative values.")
-    if (df['final_surface_ha'].dropna() < 0).all():
+    if (df['final_surface_ha'].dropna() < 0).any():
         raise ValueError("Final surface area has negative values.")
     
     surface_area_diff = df[['initial_surface_ha', 'final_surface_ha']].dropna()
-    if (surface_area_diff['final_surface_ha'] < surface_area_diff['initial_surface_ha']).all():
+    if (surface_area_diff['final_surface_ha'] < surface_area_diff['initial_surface_ha']).any():
         raise ValueError("Final surface area is greater than initial surface area.")
     
     return df
@@ -732,14 +732,14 @@ def reorder_hr_columns(dispatch_df: pd.DataFrame) -> pd.DataFrame:
     for c in cols:
         dispatch_df.loc[:,c] = pd.to_datetime(dispatch_df[c].astype(str).str.strip(), format="%Y-%m-%d %H:%M", errors="coerce")
 
-    dispatch_df = dispatch_df.dropna(subset=cols)
+    #dispatch_df = dispatch_df.dropna(subset=cols)
     
     reordered_df = dispatch_df.sort_values(by=cols, ascending=True)
 
     return reordered_df
 
 
-def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_columns: list[str] = ['fire_id', 'start_datetime', 'control_datetime', 'season'], dispatch_df_columns: list[str] = None, on: str = "fire_id") -> pd.DataFrame:
+def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_columns: list[str] = ['fire_id', 'start_datetime', 'arrival_datetime_inc', 'control_datetime', 'season'], dispatch_df_columns: list[str] = None, on: str = "fire_id") -> pd.DataFrame:
     """"
     Merge two DataFrames based on a common id column.
     
@@ -773,39 +773,69 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
             dispatch_df = dispatch_df.drop(columns=[col])
         if col.endswith('_datetime'):
             right_df.loc[:, col] = pd.to_datetime(right_df[col].astype(str).str.strip(), format="%Y-%m-%d %H:%M:%S", errors="coerce")
-            
+    
+                
     merged_df = pd.merge(left=dispatch_df, right=right_df, on=on, how='left')
 
     return merged_df
     
+     
+def create_qaqc_df(fire_df: pd.DataFrame, dispatch_df, time_columns: list[str] = ['start_datetime', 'control_datetime', 'arrival_datetime_inc'], fire_id_column: str = "fire_id",) -> pd.DataFrame:
+    hr_cols = [col for col in dispatch_df.columns if col.startswith('hr_')]
     
-def create_qaqc_df(df: pd.DataFrame, time_columns: list[str] = ['start_datetime', 'hr_arribo', 'hr_combate', 'hr_control', 'control_datetime'], fire_id_column: str = "fire_id",) -> pd.DataFrame:
-    # identify rows where the order is not preserved
-    df_qaqc = df[df['start_datetime'] > df['hr_arribo']].copy()
+    for col in hr_cols + time_columns:
+        dispatch_df[col] = pd.to_datetime(dispatch_df[col])
 
-    for col in time_columns:
-        df_qaqc[col] = pd.to_datetime(df[col])
 
-    df_qaqc = df_qaqc[[fire_id_column] + time_columns + ['file_source', 'season']]
-    df_qaqc.loc[:, 'error'] = (df_qaqc['start_datetime'] - df_qaqc['hr_arribo']).dt.total_seconds() / 60
-    df_qaqc.loc[:, 'delta_control'] = (df_qaqc['control_datetime'] - df_qaqc['hr_control']).dt.total_seconds() / 60
-    
-    # hr repairment 
-    cols = [key for key in df.columns if key.startswith('hr_')]
-    for col in cols:
-        # Print datatype of each column
-        print(f"Column: {col}, dtype: {df[col].dtype}")
-    index_to_fix = df_qaqc.index
-    # Fix the order by adding 60 minutes to the hr_xxx columns
-    try:
-        df.loc[index_to_fix, cols] = df.loc[index_to_fix, cols] + pd.Timedelta(minutes=60)
-    except Exception:
-        print(f"Error fixing the order of the hr columns")
-        logger.exception("Error fixing the order of the hr columns\n %s",
-                            df.loc[index_to_fix, cols.head(10)])
+    left = fire_df[[fire_id_column] + time_columns].copy()
+    right = dispatch_df[[fire_id_column] + ['hr_arribo']].groupby(fire_id_column).min().reset_index()
+    df_qaqc = pd.merge(left, right, on=fire_id_column, how='left')
+
+    # daylight saving time error
+    df_qaqc['arrival_datetime_inc'] = pd.to_datetime(df_qaqc['arrival_datetime_inc'])
+    df_qaqc['hr_arribo'] = pd.to_datetime(df_qaqc['hr_arribo'])
+    df_qaqc['time_diff'] = (df_qaqc['arrival_datetime_inc'] - df_qaqc['hr_arribo']).dt.total_seconds() / 60
+    df_qaqc['daylight_saving_time_error'] = df_qaqc['time_diff'] == 60
+    print(f"Number of records with daylight saving time error: {df_qaqc['daylight_saving_time_error'].sum()} out of {df_qaqc.shape[0]}")
 
     return df_qaqc
 
+def daylight_saving_time_error(dispatch_df, qaqc_df):
+    hr_cols = [col for col in dispatch_df.columns if col.startswith('hr_')] 
+    dispatch_df = dispatch_df.copy()
+    
+    fire_id_to_fix = qaqc_df.loc[qaqc_df['daylight_saving_time_error'], 'fire_id']
+    index_to_fix = dispatch_df.loc[dispatch_df['fire_id'].isin(fire_id_to_fix)].index
+    dispatch_df.loc[index_to_fix, hr_cols] = dispatch_df.loc[index_to_fix, hr_cols] + pd.Timedelta(minutes=60)
+    
+    # daylight saving time error
+    dispatch_df['time_diff'] = (dispatch_df['arrival_datetime_inc'] - dispatch_df['hr_arribo']).dt.total_seconds() / 60
+    dispatch_df['daylight_saving_time_error'] = dispatch_df['time_diff'] == 60
+    print(f"Number of records with daylight saving time error: {dispatch_df['daylight_saving_time_error'].sum()} out of {dispatch_df.shape[0]}")
+
+    # order error
+    dispatch_df['order_error'] = dispatch_df['start_datetime'] > dispatch_df['hr_arribo']
+    print(f"Number of records with order error: {dispatch_df['order_error'].sum()} out of {dispatch_df.shape[0]}")
+    
+    return dispatch_df
+
+def merge_and_analyze(df, dfd):
+
+    left = df[['fire_id', 'arrival_datetime_inc']].copy()
+    right = dfd[['fire_id', 'hr_arribo']].copy()
+
+    # cast to datetime
+    left['arrival_datetime_inc'] = pd.to_datetime(left['arrival_datetime_inc'])
+    right['hr_arribo'] = pd.to_datetime(right['hr_arribo'])
+    right = right.groupby('fire_id').min().reset_index()
+    merged = pd.merge(left, right, on='fire_id', how='left')
+
+    # error
+    merged['time_diff'] = (merged['arrival_datetime_inc'] - merged['hr_arribo']).dt.total_seconds() / 60
+
+    print(f"Number of records with positive time difference: {merged[merged['time_diff'] > 0].shape[0]} out of {merged.shape[0]}")
+    print(f"Number of records with negative time difference: {merged[merged['time_diff'] < 0].shape[0]} out of {merged.shape[0]}")
+    print(f"Number of records with zero time difference: {merged[merged['time_diff'] == 0].shape[0]} out of {merged.shape[0]}")
 
 
 def preprocess_pipeline(fire_data_paths: list[str], dispatch_data_paths: list[str], output_dir: str = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -848,15 +878,20 @@ def preprocess_pipeline(fire_data_paths: list[str], dispatch_data_paths: list[st
     fire_df = filter_target_zones(fire_df)
     fire_df = normalize_and_validate_surface_area_data(fire_df)
     
+    
     # Reorder HR columns and merge
     dispatch_df = reorder_hr_columns(dispatch_df)
     dispatch_df = merge_dataframes(fire_df, dispatch_df)
     
     
-    
     # Create QAQC dataframe
-    qaqc_df = create_qaqc_df(dispatch_df)
+    qaqc_df = create_qaqc_df(fire_df, dispatch_df)
     
+    # Daylight saving time error
+    dispatch_df = daylight_saving_time_error(dispatch_df, qaqc_df)
+    
+    
+    merge_and_analyze(fire_df, dispatch_df)
     
     if output_dir is not None:
         # Check directory
