@@ -21,7 +21,7 @@ Create and activate a virtual environment, then install in editable mode. All de
 **Windows/macOS/Linux (PowerShell/bash):**
 ```bash
 # Clone repo and go to development branch
-git clone git@github.com:RNS-ago/aywen.git
+git clone https://github.com/RNS-ago/aywen.git
 cd aywen
 git checkout development
 
@@ -39,7 +39,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 # Clone repo and go to development branch
-git clone git@github.com:RNS-ago/aywen.git
+git clone https://github.com/RNS-ago/aywen.git
 cd aywen
 git checkout development
 
@@ -54,7 +54,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 # Clone repo and go to development branch
-git clone git@github.com:RNS-ago/aywen.git
+git clone https://github.com/RNS-ago/aywen.git
 cd aywen
 git checkout development
 
@@ -70,7 +70,7 @@ This project includes a `uv.lock` for reproducible environments.
 **macOS/Linux (bash):**
 ```bash
 # Clone repo and go to development branch
-git clone git@github.com:RNS-ago/aywen.git
+git clone https://github.com/RNS-ago/aywen.git
 cd aywen
 git checkout development
 
@@ -88,7 +88,7 @@ uv pip install -e .
 **Windows (PowerShell):**
 ```powershell
 # Clone repo and go to development branch
-git clone git@github.com:RNS-ago/aywen.git
+git clone https://github.com/RNS-ago/aywen.git
 cd aywen
 git checkout development
 
