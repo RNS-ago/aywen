@@ -8,31 +8,150 @@ import os
 logger = logging.getLogger("aywen_logger")
 
 
-def get_zone(
+def add_zones_to_df(df,
     shapefile_path: str,
     crs: str = "EPSG:4326",
-    coords: tuple | list[tuple] = None,
-    df: pd.DataFrame = None,
     lon_col: str = "longitude",
     lat_col: str = "latitude",
     zone_col: str = "area",
-    new_zone_col: str = "region",
-    ) -> str | gpd.GeoDataFrame:
+    new_zone_col: str = "zone_alert",
+    ) -> gpd.GeoDataFrame:
     """
-    Get the region of coordinates from a shapefile, returning a GeoDataFrame if a DataFrame is provided.
+    Add the zone to a DataFrame containing the coordinates based on a shapefile.
     
     Parameters:
-        shapefile (str): Path to the shapefile.
+        df (pd.DataFrame): DataFrame containing the coordinates.
+        shapefile_path (str): Path to the shapefile.
         crs (str): Coordinate reference system. Default is "EPSG:4326".
-        coords (tuple or list[tuple]): Coordinates to get the region for. If a tuple is provided, it should be (longitude, latitude). If a list of tuples is provided, it should be a list of (longitude, latitude) tuples.
-        df (pd.DataFrame): DataFrame containing the coordinates. If provided, the function will return a GeoDataFrame instead of a list of dictionaries.
         lon_col (str): Name of the longitude column in the DataFrame. Default is "longitude".
         lat_col (str): Name of the latitude column in the DataFrame. Default is "latitude".
         zone_col (str): Name of the column containing the zones in the shapefile. Default is "area".
         new_zone_col (str): Name of the column to add to the DataFrame. Default is "region".
     
     Returns:
-        dict or list[dict] or gpd.GeoDataFrame: If a DataFrame is provided, returns a GeoDataFrame with the coordinates and the region. If a tuple is provided, returns a list of dictionaries with the coordinates and the region.
+        gpd.GeoDataFrame: Returns a GeoDataFrame containing the original columns and a new column with the zone.
+    """
+
+    try:
+        if isinstance(shapefile_path, str) == False:
+            raise TypeError("shapefile_path must be a string.")
+        if shapefile_path.endswith(".shp") == False:
+            raise ValueError("shapefile_path must be a .shp file.")
+        if os.path.exists(shapefile_path) == False:
+            raise FileNotFoundError(f"Shapefile not found: {shapefile_path}")
+        if isinstance(crs, str) == False:
+            raise TypeError("crs must be a string.")
+        if isinstance(df, pd.DataFrame) == False and df is not None:
+            raise TypeError("df must be a pandas DataFrame or None.")
+        if isinstance(lon_col, str) == False:
+            raise TypeError("lon_col must be a string.")
+        if isinstance(lat_col, str) == False:
+            raise TypeError("lat_col must be a string.")
+        if isinstance(zone_col, str) == False:
+            raise TypeError("zone_col must be a string.")
+        if isinstance(new_zone_col, str) == False:
+            raise TypeError("new_zone_col must be a string.")
+    except Exception:
+        logger.exception("Invalid input to add_zone_to_df.")
+        raise
+
+    shape_df = gpd.read_file(shapefile_path)
+    shape_df = shape_df.set_crs(crs=crs)
+
+    pts = gpd.GeoDataFrame(
+        data=df.copy(),
+        geometry=gpd.points_from_xy(df[lon_col], df[lat_col]),
+        crs=crs,
+    )
+
+    gdf = gpd.sjoin(
+        left_df=pts,
+        right_df=shape_df[[zone_col, "geometry"]],
+        how="left",
+        predicate="within",
+    )
+
+    gdf = gdf.dropna(subset=[zone_col])
+    gdf = gdf.rename(columns={zone_col: new_zone_col})
+    gdf = gdf.drop(columns=["index_right", "geometry"])
+
+    if gdf.empty:
+        logger.info("None of the coordintes were in the regions in the shapefile")
+        return None
+
+    return gdf
+
+
+def split_zones(
+    df, zone_col: str = "zone_alert", separation_keys: list[str] = ["zone_WE", "zone_NS"]
+    ) -> pd.DataFrame:
+    """
+    Split the zones in a DataFrame into separate sub-zone columns based on the separation_keys.
+    
+    Parameters:
+        df (pd.DataFrame): The DataFrame containing the zones.
+        zone_col (str): The name of the column containing the zones.
+        separation_keys (list[str]): The list of keys to split the zones into.
+    Returns:
+        pd.DataFrame: The DataFrame with the subdivided zones.
+    """
+    
+    try:
+        if isinstance(df, pd.DataFrame) == False:
+            raise TypeError("df must be a pandas DataFrame.")
+        if isinstance(zone_col, str) == False:
+            raise TypeError("zone_col must be a string.")
+        if isinstance(separation_keys, list) == False:
+            raise TypeError("separation_keys must be a list.")
+        if isinstance(separation_keys[0], str) == False:
+            raise TypeError("separation_keys must be a list of strings.")
+        if zone_col not in df.columns:
+            raise ValueError(f"zone_col {zone_col} not in df.columns")
+    except Exception:
+        logger.exception("Invalid input to split_zones.")
+        raise
+    
+    df = df.copy()
+
+    # One-liner split with automatic column naming
+    split_cols = df[zone_col].astype(str).str.split(" ", expand=True)
+
+    # Rename and assign only the columns we need
+    for i, key in enumerate(separation_keys):
+        if i < split_cols.shape[1]:
+            # Create categorical with unique values as categories
+            unique_vals = split_cols[i].dropna().unique()
+            df[key] = pd.Categorical(
+                split_cols[i], categories=unique_vals, ordered=True
+            )
+
+    df = df.drop(columns=separation_keys)
+
+    return df
+
+
+def get_zone(coords: tuple | list[tuple],
+    shapefile_path: str,
+    crs: str = "EPSG:4326",
+    lon_col: str = "longitude",
+    lat_col: str = "latitude",
+    zone_col: str = "area",
+    new_zone_col: str = "zone_alert",
+    ) -> dict | list[dict]:
+    """
+    Get the region of coordinates from a shapefile.
+    
+    Parameters:
+        coords (tuple or list[tuple]): Coordinates to get the region for. If a tuple is provided, it should be (longitude, latitude). If a list of tuples is provided, it should be a list of (longitude, latitude) tuples.
+        shapefile_path (str): Path to the shapefile.
+        crs (str): Coordinate reference system. Default is "EPSG:4326".
+        lon_col (str): Name of the longitude column in the DataFrame. Default is "longitude".
+        lat_col (str): Name of the latitude column in the DataFrame. Default is "latitude".
+        zone_col (str): Name of the column containing the zones in the shapefile. Default is "area".
+        new_zone_col (str): Name of the column to add to the DataFrame. Default is "region".
+    
+    Returns:
+        dict or list[dict]: Returns a dictionary or list of dictionaries with the coordinates and the region.
     """
     
     try:
@@ -46,8 +165,6 @@ def get_zone(
             raise TypeError("crs must be a string.")
         if isinstance(coords, tuple) == False and isinstance(coords, list) == False:
             raise TypeError("coords must be a tuple or a list of tuples.")
-        if isinstance(df, pd.DataFrame) == False and df is not None:
-            raise TypeError("df must be a pandas DataFrame or None.")
         if isinstance(lon_col, str) == False:
             raise TypeError("lon_col must be a string.")
         if isinstance(lat_col, str) == False:
@@ -59,54 +176,23 @@ def get_zone(
     except Exception:
         logger.exception("Invalid input to get_zone.")
         raise
-            
-
-    shape_df = gpd.read_file(shapefile_path)
-    shape_df = shape_df.set_crs(epsg=4326)
-
-
-    if df is not None:
-        x_coords = df[lon_col]
-        y_coords = df[lat_col]
-        coords_df = df.copy()
-    else:
-        if isinstance(coords, tuple):
-            coords = [coords]
-
-        coords = np.array(coords)
-        coords = np.transpose(coords)
-        x_coords = coords[0]
-        y_coords = coords[1]
-
-        coords_df = pd.DataFrame(np.array([x_coords, y_coords]).T, columns=[lon_col, lat_col])
-
-
-    pts = gpd.GeoDataFrame(
-        data=coords_df,
-        geometry=gpd.points_from_xy(x_coords, y_coords),
-        crs=crs,
-    )
-
-    gdf = gpd.sjoin(
-        left_df=pts,
-        right_df=shape_df[[zone_col, "geometry"]],
-        how="left",
-        predicate="within",
-    )
     
-    gdf = gdf.dropna(subset=[zone_col])
-    gdf = gdf.rename(columns={zone_col: new_zone_col})
-    gdf = gdf.drop(columns=["index_right"])
+    if isinstance(coords, tuple):
+        coords = [coords]
 
-
-    if gdf.empty:
-        logger.debug("None of the coordintes were in the regions in the shapefile")
+    coords = np.array(coords)
+    coords = np.transpose(coords)
+    x_coords = coords[0]
+    y_coords = coords[1]
+    
+    df = pd.DataFrame(np.array([x_coords, y_coords]).T, columns=[lon_col, lat_col])
+    
+    gdf = add_zones_to_df(df, shapefile_path, crs, lon_col, lat_col, zone_col, new_zone_col)
+    
+    if gdf is None:
         return None
     
-    if df is not None:
-        return gdf
-    else:
-        return [{lat_col:row[1][lat_col], lon_col:row[1][lon_col], new_zone_col:row[1][new_zone_col]} for row in gdf.iterrows()]
+    return [{lat_col:row[1][lat_col], lon_col:row[1][lon_col], new_zone_col:row[1][new_zone_col]} for row in gdf.iterrows()]
 
 
 def load_preprocessed_data(fire_data_path: str, dispatch_data_path: str):
