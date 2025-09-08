@@ -27,7 +27,7 @@ def load_datasets(
     Returns:
         list[pd.DataFrame]: A list of pandas DataFrames.
     """
-    logger.info("Loading datasets from %s.", dataset_path)
+    
     # --- Call args (debug) ---
     logger.debug("called with dataset_path=%s, separator=%s, low_memory=%s", dataset_path, separator, low_memory)
 
@@ -51,6 +51,7 @@ def load_datasets(
         raise
 
     # --- Iterate and load ---
+    logger.info("Loading datasets from %s.", dataset_path)
     dfs: list[pd.DataFrame] = []
     for path in dataset_path:
         if not os.path.isfile(path):
@@ -387,7 +388,7 @@ def standardize_fire_reports_IDs(
     return df
 
 
-def normalize_glosa_df1(s: pd.Series) -> pd.Series:
+def _normalize_glosa_df1(s: pd.Series) -> pd.Series:
     """
     df1 rules
     - HELO:  H<digits>      -> BHA<digits>
@@ -409,7 +410,7 @@ def normalize_glosa_df1(s: pd.Series) -> pd.Series:
 
     return out
 
-def normalize_glosa_df2(s: pd.Series) -> pd.Series:
+def _normalize_glosa_df2(s: pd.Series) -> pd.Series:
     """
     df2 rules
     - HELO already as BHA… : strip spaces/hyphens anywhere in value, but only when it starts with BHA
@@ -441,8 +442,8 @@ def standardize_response_teams(df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataF
     df1_norm = df1.copy()
     df2_norm = df2.copy()
 
-    df1_norm.loc[:, 'GLOSA'] = normalize_glosa_df1(df1_norm['GLOSA'])
-    df2_norm.loc[:, 'GLOSA'] = normalize_glosa_df2(df2_norm['GLOSA'])
+    df1_norm.loc[:, 'GLOSA'] = _normalize_glosa_df1(df1_norm['GLOSA'])
+    df2_norm.loc[:, 'GLOSA'] = _normalize_glosa_df2(df2_norm['GLOSA'])
 
     return df1_norm, df2_norm
 
@@ -641,8 +642,49 @@ def selecting_and_renaming_fire_variables(
     return fire_df, dispatch_df
 
 
-def map_zones_from_dispatch_to_fires(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, zone_column: str = "zone", fire_id_column: str = "fire_id") -> pd.DataFrame:
+def map_zones_from_dispatch_to_fires(
+    fire_df: pd.DataFrame,
+    dispatch_df: pd.DataFrame,
+    zone_column: str = "zone",
+    fire_id_column: str = "fire_id",
+) -> pd.DataFrame:
+    """
+    Map zones from dispatch to fires.
 
+    Parameters:
+        fire_df (pd.DataFrame): The DataFrame containing the fire data.
+        dispatch_df (pd.DataFrame): The DataFrame containing the dispatch data.
+        zone_column (str): The name of the column containing the zones in the dispatch DataFrame.
+        fire_id_column (str): The name of the column containing the fire IDs in the fire DataFrame.
+
+    Returns:
+        pd.DataFrame: The DataFrame with the zones mapped to the fire IDs.
+    """
+    # --- Call args (debug) ---
+    logger.debug("called with fire_df.shape=%s, dispatch_df.shape=%s, zone_column=%s, fire_id_column=%s", fire_df.shape, dispatch_df.shape, zone_column, fire_id_column)
+
+    # --- Validate input ---
+    try:
+        if not isinstance(fire_df, pd.DataFrame):
+            raise TypeError(f"fire_df must be a pandas DataFrame, got {type(fire_df).__name__}.")
+        if not isinstance(dispatch_df, pd.DataFrame):
+            raise TypeError(f"dispatch_df must be a pandas DataFrame, got {type(dispatch_df).__name__}.")
+        if not isinstance(zone_column, str):
+            raise TypeError(f"zone_column must be a string, got {type(zone_column).__name__}.")
+        if not isinstance(fire_id_column, str):
+            raise TypeError(f"fire_id_column must be a string, got {type(fire_id_column).__name__}.")
+        if zone_column not in dispatch_df.columns:
+            raise ValueError(f"zone_column {zone_column} not in dispatch_df.columns")
+        if fire_id_column not in fire_df.columns:
+            raise ValueError(f"fire_id_column {fire_id_column} not in fire_df.columns")
+    except Exception:
+        logger.exception("Invalid input to map_zones_from_dispatch_to_fires.")
+        raise
+
+    # --- Map zones ---
+    logger.info("Mapping zones from dispatch to fires.")
+    fire_df = fire_df.copy()
+    dispatch_df = dispatch_df.copy()
     dispach_zone_series = dispatch_df.groupby(fire_id_column)[zone_column].first()
     maped_zones_series = fire_df[fire_id_column].map(dispach_zone_series)
 
@@ -651,33 +693,64 @@ def map_zones_from_dispatch_to_fires(fire_df: pd.DataFrame, dispatch_df: pd.Data
 
     fire_df.insert(3, zone_column, maped_zones_series)
 
+    logger.info("Successfully mapped zones from dispatch to fires.")
     return fire_df
 
 
-def filter_target_zones(fire_df: pd.DataFrame, target_zones: dict = {'UNIDAD BASICA': 'BASICA', 'ZONA INTERFAZ': 'INTERFAZ', 'CONFLICTO': 'CONFLICTO', 'VALDIVIA':'VALDIVIA', 'NOCTURNO':'NOCTURNO'}, target_zones_alt: str = 'OTRO', target_zone_column: str = "target_zone") -> pd.DataFrame:
-    """"
+def filter_target_zones(
+    fire_df: pd.DataFrame,
+    target_zones: dict = {
+        "UNIDAD BASICA": "BASICA",
+        "ZONA INTERFAZ": "INTERFAZ",
+        "CONFLICTO": "CONFLICTO",
+        "VALDIVIA": "VALDIVIA",
+        "NOCTURNO": "NOCTURNO",
+    },
+    target_zones_alt: str = "OTRO",
+    target_zone_column: str = "target_zone",
+) -> pd.DataFrame:
+    """ "
     Filter a DataFrame to only fires with given target zone.
-    
+
     Parameters:
         fire_df (pd.DataFrame): The DataFrame to filter.
         target_zones (dict): The dictionary of target zones to filter on.
         target_zones_alt (str): The alternative target zone to filter on.
         target_zone_column (str): The name of the column to filter on.
-        
+
     Returns:
         fire_df (pd.DataFrame): The filtered DataFrame.
     """
-    
-    if not isinstance(fire_df, pd.DataFrame):
-        raise TypeError(f"df must be a pandas DataFrame, got {type(fire_df).__name__}.")
-    if target_zone_column not in fire_df.columns:
-        raise KeyError(f"Column '{target_zone_column}' not found in df.")
-    
+
+    # --- Call args (debug) ---
+    logger.debug("called with fire_df.shape=%s, target_zones=%s, target_zones_alt=%s, target_zone_column=%s", fire_df.shape, target_zones, target_zones_alt, target_zone_column)
+
+    # --- Validate input ---
+    try:
+        if not isinstance(fire_df, pd.DataFrame):
+            raise TypeError(f"fire_df must be a pandas DataFrame, got {type(fire_df).__name__}.")
+        if not isinstance(target_zones, dict):
+            raise TypeError(f"target_zones must be a dictionary, got {type(target_zones).__name__}.")
+        if not isinstance(target_zones_alt, str):
+            raise TypeError(f"target_zones_alt must be a string, got {type(target_zones_alt).__name__}.")
+        if not isinstance(target_zone_column, str):
+            raise TypeError(f"target_zone_column must be a string, got {type(target_zone_column).__name__}.")
+        if target_zone_column not in fire_df.columns:
+            raise ValueError(f"target_zone_column {target_zone_column} not in fire_df.columns")
+    except Exception:
+        logger.exception("Invalid input to filter_target_zones.")
+        raise
+
+    # --- Filter target zones ---
+    logger.info("Filtering target zones.")
+    fire_df = fire_df.copy()
+
     # Map target zones
     fire_df.loc[:, target_zone_column] = fire_df[target_zone_column].map(lambda x: target_zones[x] if x in target_zones else target_zones_alt)
     # Filter out zones that are not in the target zones
     fire_df = fire_df[fire_df[target_zone_column] != target_zones_alt]
-    
+
+    logger.info("Successfully filtered target zones.")
     return fire_df
 
 
@@ -692,29 +765,39 @@ def normalize_and_validate_surface_area_data(fire_df: pd.DataFrame) -> pd.DataFr
         pd.DataFrame: The validated DataFrame.
     """
 
-    if not isinstance(fire_df, pd.DataFrame):
-        raise TypeError(f"df must be a pandas DataFrame, got {type(df).__name__}.")
-    
-    df = fire_df.copy()
-    
-    # Normalize surface area data
-    if df['initial_surface_ha'].dtype == 'object':
-        df.loc[:, 'initial_surface_ha'] = df['initial_surface_ha'].str.replace('.', '').str.replace(',', '.').astype(float)
+    # --- Call args (debug) ---
+    logger.debug("called with fire_df.shape=%s", fire_df.shape)
 
-    if df['final_surface_ha'].dtype == 'object':
-        df.loc[:, 'final_surface_ha'] = df['final_surface_ha'].str.replace('m2', '').str.replace('.', '').str.replace(',', '.').astype(float)
+    # --- Validate input ---
+    try:
+        if not isinstance(fire_df, pd.DataFrame):
+            raise TypeError(f"fire_df must be a pandas DataFrame, got {type(fire_df).__name__}.")
+    except Exception:
+        logger.exception("Invalid input to normalize_and_validate_surface_area_data.")
+        raise
 
-    # Validate surface area data
-    if (df['initial_surface_ha'].dropna() < 0).any():
+    # --- Normalize and validate surface area data ---
+    logger.info("Normalizing surface area data.")
+    fire_df = fire_df.copy()
+    
+    # Normalize
+    if fire_df['initial_surface_ha'].dtype == 'object':
+        fire_df.loc[:, 'initial_surface_ha'] = fire_df['initial_surface_ha'].str.replace('.', '').str.replace(',', '.').astype(float)
+    if fire_df['final_surface_ha'].dtype == 'object':
+        fire_df.loc[:, 'final_surface_ha'] = fire_df['final_surface_ha'].str.replace('m2', '').str.replace('.', '').str.replace(',', '.').astype(float)
+
+    # Validate
+    if (fire_df['initial_surface_ha'].dropna() < 0).any():
         raise ValueError("Initial surface area has negative values.")
-    if (df['final_surface_ha'].dropna() < 0).any():
+    if (fire_df['final_surface_ha'].dropna() < 0).any():
         raise ValueError("Final surface area has negative values.")
     
-    surface_area_diff = df[['initial_surface_ha', 'final_surface_ha']].dropna()
+    surface_area_diff = fire_df[['initial_surface_ha', 'final_surface_ha']].dropna()
     if (surface_area_diff['final_surface_ha'] < surface_area_diff['initial_surface_ha']).any():
         raise ValueError("Final surface area is greater than initial surface area.")
     
-    return df
+    logger.info("Successfully normalized and validated surface area data.")
+    return fire_df
 
 
 def reorder_hr_columns(dispatch_df: pd.DataFrame) -> pd.DataFrame:
@@ -727,6 +810,21 @@ def reorder_hr_columns(dispatch_df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: The reordered DataFrame.
     """
+    # --- Call args (debug) ---
+    logger.debug("called with dispatch_df.shape=%s", dispatch_df.shape)
+    
+    # --- Validate input ---
+    try:
+        if not isinstance(dispatch_df, pd.DataFrame):
+            raise TypeError(f"dispatch_df must be a pandas DataFrame, got {type(dispatch_df).__name__}.")
+    except Exception:
+        logger.exception("Invalid input to reorder_hr_columns.")
+        raise
+    
+    # --- Reorder HR columns ---
+    logger.info("Reordering HR columns.")
+    dispatch_df = dispatch_df.copy()
+    
     cols = [c for c in dispatch_df.columns if c.startswith("hr_")]
 
     for c in cols:
@@ -735,7 +833,8 @@ def reorder_hr_columns(dispatch_df: pd.DataFrame) -> pd.DataFrame:
     #dispatch_df = dispatch_df.dropna(subset=cols)
     
     reordered_df = dispatch_df.sort_values(by=cols, ascending=True)
-
+    
+    logger.info("Successfully reordered HR columns.")
     return reordered_df
 
 
@@ -754,16 +853,34 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
         pd.DataFrame: The merged DataFrame.
     """
     
-    if not isinstance(fire_df, pd.DataFrame):
-        raise TypeError(f"fire_df must be a pandas DataFrame, got {type(fire_df).__name__}.")
-    if not isinstance(dispatch_df, pd.DataFrame):
-        raise TypeError(f"dispatch_df must be a pandas DataFrame, got {type(dispatch_df).__name__}.")
-    if on not in fire_df.columns:
-        raise KeyError(f"Column '{on}' not found in fire_df.")
-    if on not in dispatch_df.columns:
-        raise KeyError(f"Column '{on}' not found in dispatch_df.")
+    # --- Call args (debug) ---
+    logger.debug("called with fire_df.shape=%s, dispatch_df.shape=%s, fire_df_columns=%s, dispatch_df_columns=%s, on=%s", fire_df.shape, dispatch_df.shape, fire_df_columns, dispatch_df_columns, on)
     
-   
+    # --- Validate input ---
+    try:
+        if not isinstance(fire_df, pd.DataFrame):
+            raise TypeError(f"fire_df must be a pandas DataFrame, got {type(fire_df).__name__}.")
+        if not isinstance(dispatch_df, pd.DataFrame):
+            raise TypeError(f"dispatch_df must be a pandas DataFrame, got {type(dispatch_df).__name__}.")
+        if not isinstance(fire_df_columns, list):
+            raise TypeError(f"fire_df_columns must be a list, got {type(fire_df_columns).__name__}.")
+        if not isinstance(dispatch_df_columns, list):
+            raise TypeError(f"dispatch_df_columns must be a list, got {type(dispatch_df_columns).__name__}.")
+        if not isinstance(on, str):
+            raise TypeError(f"on must be a string, got {type(on).__name__}.")
+        if on not in fire_df.columns:
+            raise KeyError(f"Column '{on}' not found in fire_df.")
+        if on not in dispatch_df.columns:
+            raise KeyError(f"Column '{on}' not found in dispatch_df.")
+    except Exception:
+        logger.exception("Invalid input to merge_dataframes.")
+        raise
+    
+    # --- Merge ---
+    logger.info("Merging dataframes.")
+    fire_df = fire_df.copy()
+    dispatch_df = dispatch_df.copy()
+    
     right_df = fire_df[fire_df_columns]
     
     for col in fire_df_columns:
@@ -777,47 +894,93 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
                 
     merged_df = pd.merge(left=dispatch_df, right=right_df, on=on, how='left')
 
+    logger.info("Successfully merged dataframes.")
     return merged_df
-    
-     
-def create_qaqc_df(fire_df: pd.DataFrame, dispatch_df, time_columns: list[str] = ['start_datetime', 'control_datetime', 'arrival_datetime_inc'], fire_id_column: str = "fire_id",) -> pd.DataFrame:
-    hr_cols = [col for col in dispatch_df.columns if col.startswith('hr_')]
-    
-    for col in hr_cols + time_columns:
-        dispatch_df[col] = pd.to_datetime(dispatch_df[col])
 
 
-    left = fire_df[[fire_id_column] + time_columns].copy()
-    right = dispatch_df[[fire_id_column] + ['hr_arribo']].groupby(fire_id_column).min().reset_index()
-    df_qaqc = pd.merge(left, right, on=fire_id_column, how='left')
+def detect_and_fix_time_anomalies(
+    fire_df: pd.DataFrame,
+    dispatch_df: pd.DataFrame,
+    *,
+    fire_id_col: str = "fire_id",
+    arrival_col: str = "arrival_datetime_inc",
+    start_col: str = "start_datetime",          # adjust if your pipeline uses start_datetime_inc
+    hr_arribo_col: str = "hr_arribo",
+    hr_prefix: str = "hr_",
+    fix_dst: bool = True,
+    return_report: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame] | pd.DataFrame:
+    """
+    Detect DST 60-min anomalies and order errors, optionally fix DST by shifting all hr_* by +60 min
+    for affected fires. Returns (dispatch_df_fixed, report_df) if return_report else just dispatch_df_fixed.
+    """
+    logger.info("detect_and_fix_time_anomalies: start")
 
-    # daylight saving time error
-    df_qaqc['arrival_datetime_inc'] = pd.to_datetime(df_qaqc['arrival_datetime_inc'])
-    df_qaqc['hr_arribo'] = pd.to_datetime(df_qaqc['hr_arribo'])
-    df_qaqc['time_diff'] = (df_qaqc['arrival_datetime_inc'] - df_qaqc['hr_arribo']).dt.total_seconds() / 60
-    df_qaqc['daylight_saving_time_error'] = df_qaqc['time_diff'] == 60
-    print(f"Number of records with daylight saving time error: {df_qaqc['daylight_saving_time_error'].sum()} out of {df_qaqc.shape[0]}")
+    # ---- validation
+    if not isinstance(fire_df, pd.DataFrame) or not isinstance(dispatch_df, pd.DataFrame):
+        raise TypeError("fire_df and dispatch_df must be pandas DataFrames.")
+    for name, df, cols in (
+        ("fire_df", fire_df, {fire_id_col, arrival_col, start_col}),
+        ("dispatch_df", dispatch_df, {fire_id_col, hr_arribo_col}),
+    ):
+        missing = [c for c in cols if c not in df.columns]
+        if missing:
+            raise KeyError(f"{name} missing required columns: {missing}")
 
-    return df_qaqc
+    hr_cols = [c for c in dispatch_df.columns if c.startswith(hr_prefix)]
+    if not hr_cols:
+        logger.warning("detect_and_fix_time_anomalies: no '%s*' columns found; continuing without shifting.", hr_prefix)
 
-def daylight_saving_time_error(dispatch_df, qaqc_df):
-    hr_cols = [col for col in dispatch_df.columns if col.startswith('hr_')] 
-    dispatch_df = dispatch_df.copy()
-    
-    fire_id_to_fix = qaqc_df.loc[qaqc_df['daylight_saving_time_error'], 'fire_id']
-    index_to_fix = dispatch_df.loc[dispatch_df['fire_id'].isin(fire_id_to_fix)].index
-    dispatch_df.loc[index_to_fix, hr_cols] = dispatch_df.loc[index_to_fix, hr_cols] + pd.Timedelta(minutes=60)
-    
-    # daylight saving time error
-    dispatch_df['time_diff'] = (dispatch_df['arrival_datetime_inc'] - dispatch_df['hr_arribo']).dt.total_seconds() / 60
-    dispatch_df['daylight_saving_time_error'] = dispatch_df['time_diff'] == 60
-    print(f"Number of records with daylight saving time error: {dispatch_df['daylight_saving_time_error'].sum()} out of {dispatch_df.shape[0]}")
+    # ---- normalize datetimes
+    fd = fire_df[[fire_id_col, arrival_col, start_col]].copy()
+    fd[arrival_col] = pd.to_datetime(fd[arrival_col], errors="coerce")
+    fd[start_col] = pd.to_datetime(fd[start_col], errors="coerce")
 
-    # order error
-    dispatch_df['order_error'] = dispatch_df['start_datetime'] > dispatch_df['hr_arribo']
-    print(f"Number of records with order error: {dispatch_df['order_error'].sum()} out of {dispatch_df.shape[0]}")
-    
-    return dispatch_df
+    dd = dispatch_df.copy()
+    dd[hr_arribo_col] = pd.to_datetime(dd[hr_arribo_col], errors="coerce")
+    for c in hr_cols:
+        dd[c] = pd.to_datetime(dd[c], errors="coerce")
+
+    # ---- collapse to earliest arrival per fire on the dispatch side
+    arr_min = dd.groupby(fire_id_col, dropna=True)[hr_arribo_col].min()
+
+    rep = fd.copy()
+    rep[hr_arribo_col] = rep[fire_id_col].map(arr_min)
+    rep["time_diff_min_before"] = (rep[arrival_col] - rep[hr_arribo_col]).dt.total_seconds() / 60
+    rep["dst_flag_before"] = rep["time_diff_min_before"].round().eq(60)
+
+    # ---- apply DST shift if requested
+    affected_ids = rep.loc[rep["dst_flag_before"], fire_id_col].dropna().unique()
+    if fix_dst and affected_ids.size and hr_cols:
+        idx = dd[fire_id_col].isin(affected_ids)
+        dd.loc[idx, hr_cols] = dd.loc[idx, hr_cols] + pd.Timedelta(minutes=60)
+
+        # recompute report against adjusted arrivals
+        arr_min2 = dd.groupby(fire_id_col, dropna=True)[hr_arribo_col].min()
+        rep[hr_arribo_col] = rep[fire_id_col].map(arr_min2)
+        rep["time_diff_min_after"] = (rep[arrival_col] - rep[hr_arribo_col]).dt.total_seconds() / 60
+        rep["dst_fixed"] = rep["dst_flag_before"] & rep["time_diff_min_after"].round().eq(0)
+    else:
+        rep["time_diff_min_after"] = rep["time_diff_min_before"]
+        rep["dst_fixed"] = False
+
+    # ---- order error after any DST fix
+    rep["order_error"] = rep[start_col] > rep[hr_arribo_col]
+
+    # ---- summary logs
+    n_dst = int(rep["dst_flag_before"].sum())
+    n_fixed = int(rep["dst_fixed"].sum())
+    n_order = int(rep["order_error"].sum())
+    logger.info(
+        "detect_and_fix_time_anomalies: dst_flag_before=%d, dst_fixed=%d, order_error=%d, rows=%d",
+        n_dst, n_fixed, n_order, len(rep),
+    )
+
+    if return_report:
+        cols = [fire_id_col, arrival_col, start_col, hr_arribo_col,
+                "time_diff_min_before", "time_diff_min_after", "dst_flag_before", "dst_fixed", "order_error"]
+        return dd, rep[cols]
+    return dd
 
 def merge_and_analyze(df, dfd):
 
@@ -884,11 +1047,8 @@ def preprocess_pipeline(fire_data_paths: list[str], dispatch_data_paths: list[st
     dispatch_df = merge_dataframes(fire_df, dispatch_df)
     
     
-    # Create QAQC dataframe
-    qaqc_df = create_qaqc_df(fire_df, dispatch_df)
-    
     # Daylight saving time error
-    dispatch_df = daylight_saving_time_error(dispatch_df, qaqc_df)
+    dispatch_df = detect_and_fix_time_anomalies(fire_df, dispatch_df)
     
     
     merge_and_analyze(fire_df, dispatch_df)
@@ -901,9 +1061,8 @@ def preprocess_pipeline(fire_data_paths: list[str], dispatch_data_paths: list[st
         # Save dataframes to CSV files.
         fire_df.to_csv(f"{output_dir}/fire_data_2014-2025.csv", sep=";", index=False)
         dispatch_df.to_csv(f"{output_dir}/dispatch_data_2014-2025.csv", sep=";", index=False)
-        qaqc_df.to_csv(f"{output_dir}/qaqc_data_2014-2025.csv", sep=";", index=False)
         
         logger.info("Successfully saved preprocessed data to %s.", output_dir)
     
 
-    return fire_df, dispatch_df, qaqc_df
+    return fire_df, dispatch_df
