@@ -1001,7 +1001,7 @@ def merge_and_analyze(df, dfd):
     print(f"Number of records with zero time difference: {merged[merged['time_diff'] == 0].shape[0]} out of {merged.shape[0]}")
 
 
-def preprocess_pipeline(fire_data_paths: list[str], dispatch_data_paths: list[str], output_dir: str = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def preprocessing_pipeline(fire_data_paths: list[str], dispatch_data_paths: list[str], output_dir: str = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     # Load datasets
     fire_dfs = load_datasets(fire_data_paths)
     dispatch_dfs = load_datasets(dispatch_data_paths)
