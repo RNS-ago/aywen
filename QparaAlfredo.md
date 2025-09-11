@@ -1,0 +1,1 @@
+- el paquete 'sklearn' esta deprecado, habria que investigar si es que el nuevo paquete 'scikit-learn' es lo mismo y se puede hacer un drop-in replacement

@@ -7,4 +7,17 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
+.venv/
+
+# Test output
+testing/
+
+# Data
+*.csv
+*.shp
+*.shx
+*.dbf
+*.cpg
+
+# Specific files
+DEVELOPMENT.md
