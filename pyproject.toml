@@ -1,9 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "aywen"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+    {name = "ago-RNS", email = "your.actual.email@example.com"}
+]
 dependencies = [
     "geopandas>=1.1.1",
     "numpy>=2.3.2",
@@ -11,3 +18,74 @@ dependencies = [
     "scikit-learn>=1.7.1",
     "tqdm>=4.67.1",
 ]
+
+# --- Pixi workspace / env config ---
+[tool.pixi.workspace]
+# pixi-build is still a preview feature; this opt-in enables `pixi build`.
+preview = ["pixi-build"]  # <-- important
+channels = ["https://prefix.dev/conda-forge"]  # url form recommended
+platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]  # platforms to build for
+
+# Use your local project as an editable PyPI dependency for dev workflows.
+[tool.pixi.pypi-dependencies]
+aywen = { path = ".", editable = true }
+
+[tool.pixi.tasks]
+# Conda build (goes to dist/conda)
+build-conda = "pixi build -o dist/conda"
+
+# Wheel build (goes to dist/pypi)
+build-wheel = "python -m build --wheel --outdir dist/pypi"
+
+# Source dist (goes to dist/pypi)
+build-sdist = "python -m build --sdist --outdir dist/pypi"
+
+# Convenience: build all
+# PowerShell variant
+build-all = "powershell -NoProfile -Command \"pixi run build-conda; pixi run build-wheel; pixi run build-sdist\""
+# (Optional) Bash variant if you also use Linux/macOS:
+# build-all = "sh -lc 'pixi run build-conda && pixi run build-wheel && pixi run build-sdist'"
+
+
+
+# Prefer Conda packages where available; these override the PyPI deps at solve time.
+[tool.pixi.dependencies]
+richdem = ">=2.3.0,<3"
+python-build = "*"
+
+# --- Pixi "build a conda package" configuration ---
+# This is the key new section: it tells Pixi how to turn your Python package into a .conda.
+[tool.pixi.package]
+name = "aywen"
+version = "0.1.0"
+
+# Choose the pixi-build backend for Python projects
+[tool.pixi.package.build.backend]
+name = "pixi-build-python"
+version = "*"  # or pin e.g. "==0.3.2"
+channels = ["https://prefix.dev/conda-forge"]
+
+# Your Python build backend runs during packaging; keep setuptools since you already use it.
+[tool.pixi.package.host-dependencies]
+python = "3.11.*"
+setuptools = "*"
+wheel = "*"
+# If you prefer, you could switch to hatchling instead:
+# hatchling = "*"
+
+# What the resulting *conda* package needs at runtime.
+# Map your Python deps to conda names so conda solves them, not pip.
+[tool.pixi.package.run-dependencies]
+python = "3.11.*"
+numpy = "*"
+pandas = "*"
+scikit-learn = "*"
+tqdm = "*"
+geopandas = "*"
+richdem = ">=2.3.0,<3"
+
+# (optional) build config tweaks
+[tool.pixi.package.build.config]
+# noarch defaults to true for pure Python; set false if you build native extensions
+# noarch = false
+# extra-args = ["--no-build-isolation"]  # pixi-build already uses no-build-isolation
