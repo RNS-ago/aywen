@@ -2,7 +2,7 @@
 <img src="docs/logo_transparent.png" alt="Aywen Logo" width="300">
 </h1><br>
 
-Aywen is a lightweight toolkit for preprocessing, validating, and feature‑engineering wildfire incident and dispatch datasets. It provides a reproducible pipeline to load multiple CSVs, normalize and match incidents with dispatches, and generate QA/QC artifacts. It also includes geospatial helpers to attach zone metadata from shapefiles.
+Aywen is a lightweight toolkit for preprocessing, validating, and feature‑engineering wildfire incident and dispatch datasets. It provides a reproducible pipeline to load multiple CSVs, normalize and match incidents with dispatches. It also includes geospatial helpers to attach zone metadata from shapefiles.   
 
 ## Requirements
 - Python: >= 3.11
@@ -10,99 +10,72 @@ Aywen is a lightweight toolkit for preprocessing, validating, and feature‑engi
   - `pandas>=2.3.1`
   - `numpy>=2.3.2`
   - `geopandas>=1.1.1`
-  
-Note: As of version 0.1.0, `geopandas` is a required dependency and is installed by default.
+  - `scikit-learn>=1.7.1`
+  - `tqdm>=4.67.1`
+  - `richdem>=2.3.0,<3`
+
+Note: `richdem` does not provide precompiled wheels through PyPI, so it is installed from conda-forge, thus to use `aywen` it is recommended to use `pixi` or `conda` for environment management and dependency resolution.
 
 ## Installation
 
-### Using pip (local repo)
-Create and activate a virtual environment, then install in editable mode. All dependencies from `pyproject.toml` will be installed automatically.
+### Using pixi (Development & Building)
+This project uses [pixi](https://pixi.sh) for dependency management, providing better cross-platform compatibility and handling of scientific packages.
 
-**Windows/macOS/Linux (PowerShell/bash):**
+**Install pixi first:**
+```bash
+curl -fsSL https://pixi.sh/install.sh | bash
+# or on Windows with PowerShell:
+# iwr -useb https://pixi.sh/install.ps1 | iex
+```
+
+**Then install the project:**
 ```bash
 # Clone repo and go to development branch
 git clone https://github.com/RNS-ago/aywen.git
 cd aywen
-git checkout development
 
-# Upgrade pip and install package on current active environment
-pip install -U pip
-pip install .
+# Install all dependencies and the package
+pixi install
+
+# Activate the environment
+pixi shell
 ```
 
-### Using pip (For development)
-Create and activate a virtual environment, then install in editable mode. All dependencies from `pyproject.toml` will be installed automatically.
+**Building package from source:**
+```bash
+# Clone repo and go to directory
+git clone https://github.com/RNS-ago/aywen.git
+cd aywen
+
+# Build packages
+pixi run build-conda    # Build conda package
+
+```
+
+### Using conda (From .conda)
+Once you have built the package, you can install it using conda:
 
 **macOS/Linux (bash):**
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+# Create and activate conda environment
+conda create -n aywen python=3.11
+conda activate aywen
 
-# Clone repo and go to development branch
-git clone https://github.com/RNS-ago/aywen.git
-cd aywen
-git checkout development
-
-# Upgrade pip and install package on current active environment
-pip install -U pip
-pip install -e .
+# Install package from local directory
+conda install -c file:///path/to/aywen/dist/conda/aywen-x.x-xxxxxx.conda
 ```
+
 
 **Windows (PowerShell):**
 ```powershell
-python -m venv .venv
-source .venv/bin/activate
+# Create and activate conda environment
+conda create -n aywen python=3.11
+conda activate aywen
 
-# Clone repo and go to development branch
-git clone https://github.com/RNS-ago/aywen.git
-cd aywen
-git checkout development
+# Install package from local directory
+conda install -c file:///path/to/aywen/dist/conda/aywen-x.x-xxxxxx.conda
 
-# Upgrade pip and install package on current active environment
-pip install -U pip
-pip install -e .
 ```
-
-
-### Using uv (For developemnt)
-This project includes a `uv.lock` for reproducible environments.
-
-**macOS/Linux (bash):**
-```bash
-# Clone repo and go to development branch
-git clone https://github.com/RNS-ago/aywen.git
-cd aywen
-git checkout development
-
-# Create and activate a virtualenv managed by uv
-uv venv
-source .venv/bin/activate    # Windows: .venv\Scripts\Activate.ps1
-
-# Sync dependencies from pyproject/uv.lock
-uv sync
-
-# Alternatively, perform an editable install
-uv pip install -e .
-```
-
-**Windows (PowerShell):**
-```powershell
-# Clone repo and go to development branch
-git clone https://github.com/RNS-ago/aywen.git
-cd aywen
-git checkout development
-
-# Create and activate a virtualenv managed by uv
-uv venv
-.venv\Scripts\Activate.ps1
-
-# Sync dependencies from pyproject/uv.lock
-uv sync
-
-# Alternatively, perform an editable install
-uv pip install -e .
-```
-
 
 
 ## Quick Start
@@ -181,10 +154,46 @@ configure_logging()
 logging.getLogger("aywen_logger").setLevel(logging.DEBUG)
 ```
 
+## Development
+
+### Environment Management
+This project uses pixi for dependency management with a hybrid configuration that supports both conda and PyPI packages:
+
+```bash
+# Set up development environment
+pixi install
+
+# Activate environment
+pixi shell
+
+# Run tests
+pixi run python -m pytest  # if you have tests
+
+# Build packages
+pixi run build-conda    # Build conda package
+pixi run build-wheel    # Build PyPI wheel
+pixi run build-all      # Build all package types
+```
+
+### For Contributors
+- **Preferred**: Use pixi for the best experience with scientific dependencies
+- **Alternative**: Standard pip workflow is also supported via `pyproject.toml`
+- Dependencies are locked in `pixi.lock` for reproducible environments
+- The project builds both conda packages (via pixi-build) and PyPI wheels
+
+### Package Structure
+- Configuration: `pyproject.toml` (hybrid pixi + standard Python)
+- Lock file: `pixi.lock`
+- Dependencies: Conda packages preferred, with PyPI fallback for unavailable packages
+
 ## Notes
 - Expected columns referenced by helpers (e.g., `hr_arribo`, `glosa`, `recurso`, `fire_id`, `arrival_datetime_inc`) are standardized inside the pipeline; see `src/aywen/preprocessing.py` and `src/aywen/features.py` for details.
 - Logging is preconfigured with colorized console output; see `src/aywen/logging_setup.py`.
+- For best compatibility with geospatial dependencies (GDAL, GEOS, etc.), pixi is recommended over pip.
 
-## Development
-- Versioning and dependencies are defined in `pyproject.toml`. Use `uv sync` for a deterministic environment (via `uv.lock`), or `pip install -e .` for editable development.
-- Contributions welcome. Please open an issue or PR with a clear description and minimal reproducible example.
+## Contributing
+Contributions welcome! Please:
+1. Use pixi for development setup (required due to richdem dependency)
+2. Open an issue or PR with a clear description
+3. Include minimal reproducible examples
+4. Follow existing code style and logging patterns
