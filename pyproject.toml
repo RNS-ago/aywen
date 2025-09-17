@@ -52,6 +52,8 @@ build-all = "powershell -NoProfile -Command \"pixi run build-conda; pixi run bui
 [tool.pixi.dependencies]
 richdem = ">=2.3.0,<3"
 python-build = "*"
+ipykernel = ">=6.30.1,<7"
+pytest = ">=8.4.2,<9"
 
 # --- Pixi "build a conda package" configuration ---
 # This is the key new section: it tells Pixi how to turn your Python package into a .conda.

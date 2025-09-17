@@ -530,7 +530,7 @@ def add_initial_derived_parameters(
 
 
 def get_weather_data(
-    folder: str = "../../2_data/processed/",
+    folder: str = "G:/Shared drives/OpturionHome/AraucoFire/2_data/processed/",
     filename: str = "Incendios_2014-2025_VHT_v3.csv",
     usecols: list[str] | None = None,
     sep: str = ";",
