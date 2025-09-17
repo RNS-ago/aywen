@@ -499,7 +499,7 @@ def add_initial_derived_parameters(
     # 3) Trim upper outliers
     upper_limit = out[m2_col].quantile(outlier_quantile)
     before = len(out)
-    out = out[out[m2_col] < upper_limit]
+    out = out[out[m2_col] < upper_limit].reset_index(drop=True)
     logger.info(
         "Trimmed upper outliers at q=%.3f (%.2f). Rows: %d → %d.",
         outlier_quantile, upper_limit, before, len(out)
@@ -1252,6 +1252,7 @@ def add_zones_to_df(df,
         crs=crs,
     )
 
+
     gdf = gpd.sjoin(
         left_df=pts,
         right_df=shape_df[[zone_col, "geometry"]],
@@ -1259,7 +1260,15 @@ def add_zones_to_df(df,
         predicate="within",
     )
 
+    len_df = len(df)
+    len_gdf = len(gdf)
+    if len_df != len_gdf:
+        logger.info("Row count changed after spatial join: %d -> %d", len_df, len_gdf)
+
+    len_gdf = len(gdf)
     gdf = gdf.dropna(subset=[zone_col])
+    if len_gdf != len(gdf):
+        logger.info("Dropped %d rows with no zone match.", len_gdf - len(gdf))
     gdf = gdf.rename(columns={zone_col: new_zone_col})
     gdf = gdf.drop(columns=["index_right", "geometry"])
 
@@ -1275,6 +1284,7 @@ def split_zones(
     df,
     zone_col: str = "zone_alert",
     separation_keys: list[str] = ["zone_WE", "zone_NS"],
+    separation_levels: list[str] = [['Costa', 'Valle', 'Cordillera'], ['1', '2', '3', '4', '5']]
 ) -> pd.DataFrame:
     """
     Split the zones in a DataFrame into separate sub-zone columns based on the separation_keys.
@@ -1319,9 +1329,8 @@ def split_zones(
     for i, key in enumerate(separation_keys):
         if i < split_cols.shape[1]:
             # Create categorical with unique values as categories
-            unique_vals = split_cols[i].dropna().unique()
             df[key] = pd.Categorical(
-                split_cols[i], categories=unique_vals, ordered=True
+                split_cols[i], categories=separation_levels[i], ordered=True
             )
 
     
@@ -1466,7 +1475,6 @@ def add_sin_cos_hour(
     sin_col: str = "sin_hour",
     cos_col: str = "cos_hour",
     period: int = 24,
-    peak_time: int = 15,            # passed to TimeOfDayFeatures(peak_time=...)
     tod: TimeOfDayFeatures | None = None,
 ) -> pd.DataFrame:
     """
@@ -1475,10 +1483,10 @@ def add_sin_cos_hour(
     Steps
     -----
     1) Extract hour-of-day from `datetime_col` into `hour_col` (0..23).
-    2) Use TimeOfDayFeatures(period, peak_time) to compute sin/cos encodings.
+    2) Use TimeOfDayFeatures(period) to compute sin/cos encodings.
        - `sin_col` := sin(theta + phase)
        - `cos_col` := cos(theta + phase)
-       where theta = 2π * hour / period and phase is set from `peak_time`.
+       where theta = 2π * hour / period
 
     Parameters
     ----------
@@ -1491,10 +1499,8 @@ def add_sin_cos_hour(
         Output columns for the cyclical encoding.
     period : int
         Period of the cycle (default 24 for hours).
-    peak_time : int
-        Peak time passed to TimeOfDayFeatures(peak_time=...).
     tod : TimeOfDayFeatures | None
-        If provided, use this instance; otherwise create one with (period, peak_time).
+        If provided, use this instance; otherwise create one with (period).
 
     Returns
     -------
@@ -1502,8 +1508,8 @@ def add_sin_cos_hour(
         Copy of df with `hour_col`, `sin_col`, and `cos_col` added.
     """
     logger.debug(
-        "add_sin_cos_hour called with df.shape=%s, datetime_col=%s, period=%s, peak_time=%s",
-        df.shape, datetime_col, period, peak_time
+        "add_sin_cos_hour called with df.shape=%s, datetime_col=%s, period=%s",
+        df.shape, datetime_col, period
     )
 
     if datetime_col not in df.columns:
@@ -1517,7 +1523,7 @@ def add_sin_cos_hour(
 
     # 2) Build/features via TimeOfDayFeatures
     if tod is None:
-        tod = TimeOfDayFeatures(period=period, peak_time=peak_time)
+        tod = TimeOfDayFeatures(period=period)
 
     # The transformer accepts any shape; we’ll pass 2D to mirror your snippet
     hours_arr = out[hour_col].to_numpy().reshape(-1, 1)
@@ -1528,8 +1534,8 @@ def add_sin_cos_hour(
 
     nn = int(out[hour_col].notna().sum())
     logger.info(
-        "Added cyclical hour features (%s,%s) with period=%d, peak_time=%d. Non-null hours=%d/%d.",
-        sin_col, cos_col, period, peak_time, nn, len(out)
+        "Added cyclical hour features (%s,%s) with period=%d. Non-null hours=%d/%d.",
+        sin_col, cos_col, period, nn, len(out)
     )
     logger.debug("Hour summary:\n%s", out[hour_col].describe())
 
@@ -1578,3 +1584,107 @@ def add_subseason(
     return out
 
 
+def is_high_season(ts):
+    """
+    Returns high or low depending if the timestamp falls between Dec 15 and Mar 15 (inclusive),
+    ignoring the year.
+    """
+    m, d = ts.month, ts.day
+    
+    # Dec 15 to Dec 31
+    if (m == 12 and d >= 15) or (m == 1) or (m == 2) or (m == 3 and d <= 15):
+        return 'high'
+    else:
+        return 'low'
+    
+
+def add_high_seasson(
+        df: pd.DataFrame,
+        datetime_col: str = "start_datetime",
+        high_season_col: str = "high_season",
+    ) -> pd.DataFrame:
+    """
+    Add a 'high_season' categorical based on month and day from `datetime_col`.
+
+    Default mapping:
+        - high   : Dec 15 to Mar 15 (inclusive)
+        - low    : all other dates
+
+    Returns a NEW DataFrame with `high_season` column.
+    """
+    datetime_col = "start_datetime"
+    high_season_col = "high_season"
+
+    if datetime_col not in df.columns:
+        raise KeyError(f"Column '{datetime_col}' not found in df.")
+
+    out = df.copy()
+    dt = pd.to_datetime(out[datetime_col])
+    out[high_season_col] = dt.apply(is_high_season)
+    out[high_season_col] = pd.Categorical(out[high_season_col], categories=['low', 'high'], ordered=True)
+
+    logger.info(
+        "Added high_season from %s. Counts: %s",
+        datetime_col, out[high_season_col].value_counts(dropna=False).to_dict()
+    )
+    return out
+
+
+def nocturnal(row, target_zone_col: str = "target_zone") -> str:
+  if row[target_zone_col]=="NOCTURNO":
+    return "Night"
+  else:
+    return "Day"
+
+
+def add_nocturnal(
+        df: pd.DataFrame,
+        target_zone_col: str = "target_zone",
+        nocturnal_col: str = "nocturnal",
+        ) -> pd.DataFrame:
+    """
+    Add a 'nocturnal' categorical based on the 'target_zone' column.
+
+    Returns a NEW DataFrame with the 'nocturnal' column.
+    """
+    if target_zone_col not in df.columns:
+        raise KeyError(f"Column '{target_zone_col}' not found in df.")
+
+    out = df.copy()
+    out[nocturnal_col] = out.apply(lambda row: nocturnal(row, target_zone_col=target_zone_col), axis=1)
+    out[nocturnal_col] = pd.Categorical(out[nocturnal_col], categories=["Day", "Night"], ordered=True)
+
+    logger.info(
+        f"Added nocturnal from {target_zone_col}. Counts: %s",
+        out[nocturnal_col].value_counts(dropna=False).to_dict()
+    )
+    return out
+
+def feature_engineering_pipeline(
+        df: pd.DataFrame,
+        shapefile_path: str,
+        csv_path: str,
+        id_col: str = "fire_id",
+        datetime_col: str = "start_datetime",
+        lon_col: str = "longitude",
+        lat_col: str = "latitude",
+        crs: str = "EPSG:4326",
+        zone_col: str = "area",
+        target_zone_col: str = "target_zone"
+        ) -> pd.DataFrame:
+
+        out = df.copy()
+        out = add_zones_to_df(df = out,shapefile_path=shapefile_path,crs = crs,lon_col=lon_col,lat_col=lat_col,zone_col=zone_col,new_zone_col="zone_alert",)
+        out = split_zones(df = out,zone_col = "zone_alert",separation_keys = ["zone_WE", "zone_NS"]) 
+        out = add_sin_cos_hour(df = out,datetime_col = datetime_col,sin_col = 'sin_hour',cos_col = 'cos_hour')
+        out = get_topographical_data(df = out,csv_path = csv_path,lon_col = lon_col,lat_col = lat_col,id_col = id_col)
+        out = add_nocturnal(df = out,target_zone_col = target_zone_col, nocturnal_col = 'day_night')
+        out = add_high_seasson(df = out,datetime_col = datetime_col,high_season_col = 'high_season')
+        weather = get_weather_data() # this will be replaced by an streaming API
+        out = merge_weather_data(out, weather)
+        out = process_weather_features(out)
+        out = process_dt_minutes(out)
+        out = add_initial_derived_parameters(out)
+        out = propagation_speed_analysis(out)
+
+        return out

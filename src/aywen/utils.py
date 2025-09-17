@@ -84,14 +84,12 @@ class SpeedCategoryTransformer(BaseEstimator, TransformerMixin):
 
 
 class TimeOfDayFeatures(BaseEstimator, TransformerMixin):
-    def __init__(self, period=24, peak_time=None):
+    def __init__(self, period=24):
         """
         Parameters:
         - period: periodicity of the cycle (default: 24 for hours)
-        - phase: fixed phase in radians. If None, it will be learned in fit().
         """
         self.period = period
-        self.phase = 2 * np.pi * (peak_time - 1) / period
 
     def fit(self, X, y=None):
         return self
@@ -104,8 +102,8 @@ class TimeOfDayFeatures(BaseEstimator, TransformerMixin):
         X = np.asarray(X).reshape(-1)
         theta = 2 * np.pi * X / self.period
 
-        sin_hour = np.sin(theta + self.phase)
-        cos_hour = np.cos(theta + self.phase)
+        cos_hour = np.cos(theta)
+        sin_hour = np.sin(theta)
 
         return sin_hour, cos_hour
     

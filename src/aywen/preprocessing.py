@@ -5,7 +5,7 @@ import os
 import pandas as pd
 import re
 
-from .utils import log_step, concatnate_name_from_paths
+from .utils import concatnate_name_from_paths
 
 
 logger = logging.getLogger("aywen_logger")
@@ -864,8 +864,8 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
             raise TypeError(f"dispatch_df must be a pandas DataFrame, got {type(dispatch_df).__name__}.")
         if not isinstance(fire_df_columns, list):
             raise TypeError(f"fire_df_columns must be a list, got {type(fire_df_columns).__name__}.")
-        if not isinstance(dispatch_df_columns, list):
-            raise TypeError(f"dispatch_df_columns must be a list, got {type(dispatch_df_columns).__name__}.")
+        if not isinstance(dispatch_df_columns, list): # deprecated
+            logger.warning(f"dispatch_df_columns must be a list, got {type(dispatch_df_columns).__name__}.")
         if not isinstance(on, str):
             raise TypeError(f"on must be a string, got {type(on).__name__}.")
         if on not in fire_df.columns:
@@ -996,9 +996,9 @@ def merge_and_analyze(df, dfd):
     # error
     merged['time_diff'] = (merged['arrival_datetime_inc'] - merged['hr_arribo']).dt.total_seconds() / 60
 
-    print(f"Number of records with positive time difference: {merged[merged['time_diff'] > 0].shape[0]} out of {merged.shape[0]}")
-    print(f"Number of records with negative time difference: {merged[merged['time_diff'] < 0].shape[0]} out of {merged.shape[0]}")
-    print(f"Number of records with zero time difference: {merged[merged['time_diff'] == 0].shape[0]} out of {merged.shape[0]}")
+    # print(f"Number of records with positive time difference: {merged[merged['time_diff'] > 0].shape[0]} out of {merged.shape[0]}")
+    # print(f"Number of records with negative time difference: {merged[merged['time_diff'] < 0].shape[0]} out of {merged.shape[0]}")
+    # print(f"Number of records with zero time difference: {merged[merged['time_diff'] == 0].shape[0]} out of {merged.shape[0]}")
 
 
 def preprocessing_pipeline(fire_data_paths: list[str], dispatch_data_paths: list[str], output_dir: str = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -1048,7 +1048,7 @@ def preprocessing_pipeline(fire_data_paths: list[str], dispatch_data_paths: list
     
     
     # Daylight saving time error
-    dispatch_df = detect_and_fix_time_anomalies(fire_df, dispatch_df)
+    dispatch_df = detect_and_fix_time_anomalies(fire_df, dispatch_df, return_report=False)
     
     
     merge_and_analyze(fire_df, dispatch_df)
