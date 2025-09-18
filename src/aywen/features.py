@@ -505,7 +505,46 @@ def add_initial_derived_parameters(
         outlier_quantile, upper_limit, before, len(out)
     )
 
-    # 4) Reduce/normalize fuel categories
+    return out
+
+
+def add_fuel_to_df(
+        df: pd.DataFrame,
+        fuel_tiff_path: str,
+        lon_col: str = "longitude",
+        lat_col: str = "latitude",
+        fuel_col : str = "initial_fuel",
+) -> pd.DataFrame:
+    
+    out = df.copy()
+
+    if fuel_col in out.columns:
+        logger.info("Column %s already exists in df, it will NOT be overwritten.", fuel_col)
+        return out
+    
+    if not os.path.exists(fuel_tiff_path):
+        raise FileNotFoundError(f"Fuel GeoTIFF file not found: {fuel_tiff_path}")
+
+    # 1) Load fuel data from GeoTIFF
+    #fuel_data = load_fuel_data(fuel_tiff_path, lon_col, lat_col)
+    fuel_data = df[['longitude', 'latitude']].copy()
+    fuel_data[fuel_col] = 'matorral__arbustos_y_oespecies'  # Placeholder for actual fuel data loading logic
+    # 2) Merge with main DataFrame
+    df = df.merge(fuel_data, on=["longitude", "latitude"], how="left")
+    logger.info("Added fuel data from %s", fuel_tiff_path)
+
+    return df
+
+
+def add_fuel_reduced(
+        df: pd.DataFrame,
+        fuel_col: str = "initial_fuel",
+       fuel_reduced_col: str = "initial_fuel_reduced",
+       min_fuel_samples: int = 15
+) -> pd.DataFrame:
+
+    out = df.copy()
+
     fuel_counts = out[fuel_col].value_counts(dropna=True)
     rare_fuels = fuel_counts[fuel_counts < min_fuel_samples].index
     out[fuel_reduced_col] = out[fuel_col].replace(rare_fuels, "Other")
@@ -527,6 +566,7 @@ def add_initial_derived_parameters(
     logger.info("Fuel categories reduced: %d (from %d).", kept, original)
 
     return out
+
 
 
 def get_weather_data(
@@ -1662,29 +1702,37 @@ def add_nocturnal(
 
 def feature_engineering_pipeline(
         df: pd.DataFrame,
-        shapefile_path: str,
-        csv_path: str,
         id_col: str = "fire_id",
         datetime_col: str = "start_datetime",
         lon_col: str = "longitude",
         lat_col: str = "latitude",
         crs: str = "EPSG:4326",
+        zone_shapefile_path: str = None,
         zone_col: str = "area",
-        target_zone_col: str = "target_zone"
+        topo_csv_path: str = None,
+        target_zone_col: str = "target_zone",
+        fuel_tiff_path: str = None,
+        fuel_col: str = "initial_fuel",
+        skip_weather: bool = False,
+        skip_target: bool = False,
         ) -> pd.DataFrame:
 
         out = df.copy()
-        out = add_zones_to_df(df = out,shapefile_path=shapefile_path,crs = crs,lon_col=lon_col,lat_col=lat_col,zone_col=zone_col,new_zone_col="zone_alert",)
+        out = add_zones_to_df(df = out,shapefile_path=zone_shapefile_path, crs = crs, lon_col=lon_col,lat_col=lat_col,zone_col=zone_col,new_zone_col="zone_alert",)
         out = split_zones(df = out,zone_col = "zone_alert",separation_keys = ["zone_WE", "zone_NS"]) 
         out = add_sin_cos_hour(df = out,datetime_col = datetime_col,sin_col = 'sin_hour',cos_col = 'cos_hour')
-        out = get_topographical_data(df = out,csv_path = csv_path,lon_col = lon_col,lat_col = lat_col,id_col = id_col)
+        out = get_topographical_data(df = out,csv_path = topo_csv_path,lon_col = lon_col,lat_col = lat_col,id_col = id_col)
         out = add_nocturnal(df = out,target_zone_col = target_zone_col, nocturnal_col = 'day_night')
-        out = add_high_seasson(df = out,datetime_col = datetime_col,high_season_col = 'high_season')
-        weather = get_weather_data() # this will be replaced by an streaming API
-        out = merge_weather_data(out, weather)
-        out = process_weather_features(out)
-        out = process_dt_minutes(out)
-        out = add_initial_derived_parameters(out)
-        out = propagation_speed_analysis(out)
+        out = add_high_seasson(df = out, datetime_col = datetime_col,high_season_col = 'high_season')
+        out = add_fuel_to_df(df = out, fuel_col = fuel_col, fuel_tiff_path=fuel_tiff_path)
+        out = add_fuel_reduced(df = out, fuel_col = fuel_col, fuel_reduced_col = 'initial_fuel_reduced')
+        if not skip_weather:
+            weather = get_weather_data() # this will be replaced by an streaming API
+            out = merge_weather_data(out, weather)
+            out = process_weather_features(out)
+        if not skip_target:
+            out = process_dt_minutes(out)
+            out = add_initial_derived_parameters(out)
+            out = propagation_speed_analysis(out)
 
         return out
