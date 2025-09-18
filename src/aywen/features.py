@@ -10,7 +10,7 @@ from aywen.utils import TimeOfDayFeatures
 
 
 logger = logging.getLogger("aywen_logger")
-
+logger.warning("The 'features' module is deprecated and will be removed in future versions. Use 'fire_features' instead.")
 
 
 
@@ -616,7 +616,7 @@ def get_weather_data(
         raise FileNotFoundError(f"CSV not found: {path}")
 
     # Load
-    weather = pd.read_csv(path, sep=sep, usecols=usecols)
+    weather = pd.read_csv(path, sep=sep, usecols=usecols, low_memory=False)
 
     # Rename
     weather = weather.rename(

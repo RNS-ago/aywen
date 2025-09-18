@@ -838,7 +838,7 @@ def reorder_hr_columns(dispatch_df: pd.DataFrame) -> pd.DataFrame:
     return reordered_df
 
 
-def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_columns: list[str] = ['fire_id', 'start_datetime', 'arrival_datetime_inc', 'control_datetime', 'season'], dispatch_df_columns: list[str] = None, on: str = "fire_id") -> pd.DataFrame:
+def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_columns: list[str] = ['fire_id', 'start_datetime', 'arrival_datetime_inc', 'control_datetime', 'season'], on: str = "fire_id") -> pd.DataFrame:
     """"
     Merge two DataFrames based on a common id column.
     
@@ -846,7 +846,6 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
         fire_df (pd.DataFrame): The first DataFrame to merge.
         dispatch_df (pd.DataFrame): The second DataFrame to merge.
         fire_df_columns (list[str]): The list of columns to keep from fire_df.
-        dispatch_df_columns (list[str]): The list of columns to keep from dispatch_df.
         on (str): The column to merge on.
         
     Returns:
@@ -854,7 +853,7 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
     """
     
     # --- Call args (debug) ---
-    logger.debug("called with fire_df.shape=%s, dispatch_df.shape=%s, fire_df_columns=%s, dispatch_df_columns=%s, on=%s", fire_df.shape, dispatch_df.shape, fire_df_columns, dispatch_df_columns, on)
+    logger.debug("called with fire_df.shape=%s, dispatch_df.shape=%s, fire_df_columns=%s, on=%s", fire_df.shape, dispatch_df.shape, fire_df_columns, on)
     
     # --- Validate input ---
     try:
@@ -864,8 +863,6 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
             raise TypeError(f"dispatch_df must be a pandas DataFrame, got {type(dispatch_df).__name__}.")
         if not isinstance(fire_df_columns, list):
             raise TypeError(f"fire_df_columns must be a list, got {type(fire_df_columns).__name__}.")
-        if not isinstance(dispatch_df_columns, list): # deprecated
-            logger.warning(f"dispatch_df_columns must be a list, got {type(dispatch_df_columns).__name__}.")
         if not isinstance(on, str):
             raise TypeError(f"on must be a string, got {type(on).__name__}.")
         if on not in fire_df.columns:
