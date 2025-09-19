@@ -133,3 +133,16 @@ class MonthCycleFeatures(BaseEstimator, TransformerMixin):
         return np.sin(theta - self.phase), np.cos(theta - self.phase)
 
 
+def make_dtype_dict(df: pd.DataFrame):
+    dtype_dict = {}
+    for col in df.columns:
+        if pd.api.types.is_categorical_dtype(df[col]):
+            cat = df[col].dtype
+            # keep categories and order
+            dtype_dict[col] = pd.api.types.CategoricalDtype(
+                categories=cat.categories,
+                ordered=cat.ordered
+            )
+        else:
+            dtype_dict[col] = df[col].dtype
+    return dtype_dict
