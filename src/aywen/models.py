@@ -4,6 +4,9 @@ import xgboost as xgb
 import optuna
 import joblib
 import json
+import logging
+
+logger = logging.getLogger("aywen_logger")
 
 def xgb_tune_fit(X_train, y_train, X_valid, y_valid, base_params):
 
@@ -84,7 +87,7 @@ def train_model(df_all, df_train, df_valid, df_trainvalid, covariates, target, b
 
 
     # First stage: hyperparameter tuning. Each round with early stopping
-    print(f"stage 1: tuning model.")
+    logger.info("stage 1: tuning model.")
 
     best_params, best_round = xgb_tune_fit(
         X_train=X_train, 
@@ -96,7 +99,7 @@ def train_model(df_all, df_train, df_valid, df_trainvalid, covariates, target, b
 
 
     # Second stage: retrain on train+valid dataset
-    print('stage 2: retrain on train+valid dataset')
+    logger.info("stage 2: retrain on train+valid dataset")
     dtrainvalid = xgb.DMatrix(X_trainvalid, label=y_trainvalid, enable_categorical=True)
 
     best_params.update(base_params)
@@ -112,7 +115,7 @@ def train_model(df_all, df_train, df_valid, df_trainvalid, covariates, target, b
 
     
     # Third stage: retrain on the whole dataset
-    print('stage 3: retrain on the whole dataset')
+    logger.info("stage 3: retrain on the whole dataset")
     dall = xgb.DMatrix(X_all, label=y_all, enable_categorical=True)
 
     model = xgb.train(
@@ -165,7 +168,7 @@ def _ensure_ordered_row(X_row: pd.DataFrame, covariates: list, covariates_catego
     return X_ordered
 
 
-def eval_point_prediction(X_new, model, covariates, covariates_categorical, cat_dtype_map):
+def old_eval_point_prediction(X_new, model, covariates, covariates_categorical, cat_dtype_map):
     
     # 1) Build ordered, typed row
     X_ordered = _ensure_ordered_row(X_new, covariates, covariates_categorical, cat_dtype_map)
@@ -188,28 +191,36 @@ def eval_point_prediction(X_new, model, covariates, covariates_categorical, cat_
         "shap_values": shap_dict,
     }
 
+def eval_point_prediction(X_new, model, covariates, mgr):
+    
+    # 1) Build ordered, typed row
+    X_new = X_new[covariates].copy()
+    X_ordered = mgr.apply(X_new[covariates], strict=True, include=covariates).copy()
 
-def eval_prediction_interval(X_new, model, covariates, covariates_categorical):
+    # 2) Predict with TreeSHAP
+    dnew = xgb.DMatrix(X_ordered, enable_categorical=True, feature_names=covariates)
+    contribs = model.predict(dnew, pred_contribs=True).reshape(-1)  # [n_features + 1]
+
+    base_value = float(contribs[-1])
+    shap_vals = contribs[:-1]  # length == len(covariates)
+
+    # 3) Margin prediction (apply your link/back-transform if needed)
+    pred_margin = base_value + float(shap_vals.sum())
+
+    # 4) Return as aligned structures
+    shap_dict = {covariates[i]: shap_vals[i] for i in range(len(covariates))}
+    return {
+        "prediction": pred_margin,
+        "base_value": base_value,
+        "shap_values": shap_dict,
+    }
+
+
+def eval_prediction_interval(X_new, model, covariates):
 
     assert isinstance(model, dict) and "lo" in model and "hi" in model, \
         "PI model must be a dictionary with keys 'lo' and 'hi'"
     return model
-
-
-def _save_model(model, pi, meta, model_path, pi_path, meta_path):
-
-    joblib.dump(model, model_path)
-
-    with open(pi_path, "w", encoding="utf-8") as f:
-        json.dump(pi, f, indent=2)
-
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
-
-    print(f"Saved model -> {model_path}")
-    print(f"Saved PI    -> {pi_path}")
-    print(f"Saved meta  -> {meta_path}")
-
 
 
 def train_pipeline(
@@ -218,17 +229,15 @@ def train_pipeline(
        factor2: str,
        target: str,
        covariates: list,
-       covariates_categorical: list,
        pi_covariates: list,
-       save_artifacts: bool,
-       artifacts_dir: str,
-       cat_dtype_map: dict = None
+       alpha: float = 0.1,
 ):
     
+    out = df.copy()
     point_prediction_dict = {}
     prediction_interval_dict = {}
 
-    for g, df_all in df.groupby([factor1, factor2], observed=True, dropna=False):
+    for g, df_all in out.groupby([factor1, factor2], observed=True, dropna=False):
 
         # I prefer not to silently drop missing values here
         usecols = [target] + covariates
@@ -241,12 +250,12 @@ def train_pipeline(
 
         # Check if train set is empty
         if df_train.empty:
-            print(f"Skipping group {g} (no train rows).")
+            logger.warning(f"Skipping group {g} (no train rows).")
             continue
 
         # If y has only one unique value, skip
         if df_train[target].nunique() < 2:
-            print(f"Skipping group {g} (only one unique target value).")
+            logger.warning(f"Skipping group {g} (only one unique target value).")
             continue
         
         # train the point prediction model
@@ -255,15 +264,14 @@ def train_pipeline(
         # Model0 point predictions
         dall = xgb.DMatrix(df_all[covariates], label=df_all[target], enable_categorical=True)
         preds = model0.predict(dall)
-        df.loc[df_all.index, "prediction_xgb0"] = preds
+        out.loc[df_all.index, "prediction_xgb0"] = preds
 
         # Model point predictions
         preds = model.predict(dall)
-        df.loc[df_all.index, "prediction_xgb"] = preds
+        out.loc[df_all.index, "prediction_xgb"] = preds
         point_prediction_dict[g] = model # final model is stored
 
         # get prediction intervals
-        alpha = 0.1
         pi0 = get_predictive_intervals(model0, df_valid, covariates, pi_covariates, target, alpha=alpha,  heteroscedastic=False)
         pi = get_predictive_intervals(model, df, covariates, pi_covariates, target, alpha=alpha,  heteroscedastic=False)
         prediction_interval_dict[g] = pi # final model is stored
@@ -272,38 +280,63 @@ def train_pipeline(
         idx = df_all.index
 
         if not pi_covariates:
-            df.loc[idx, 'lo_xgb0'] = pi0['lo']
-            df.loc[idx, 'hi_xgb0'] = pi0['hi']
+            out.loc[idx, 'lo_xgb0'] = pi0['lo']
+            out.loc[idx, 'hi_xgb0'] = pi0['hi']
         else:
-            key_series = df.loc[idx, pi_covariates].agg(tuple, axis=1)
-            df.loc[idx, 'lo_xgb0'] = key_series.map(pi0['lo'])
-            df.loc[idx, 'hi_xgb0'] = key_series.map(pi0['hi'])
+            key_series = out.loc[idx, pi_covariates].agg(tuple, axis=1)
+            out.loc[idx, 'lo_xgb0'] = key_series.map(pi0['lo'])
+            out.loc[idx, 'hi_xgb0'] = key_series.map(pi0['hi'])
 
         if not pi_covariates:
-            df.loc[idx, 'lo_xgb'] = pi['lo']
-            df.loc[idx, 'hi_xgb'] = pi['hi']
+            out.loc[idx, 'lo_xgb'] = pi['lo']
+            out.loc[idx, 'hi_xgb'] = pi['hi']
         else:
-            key_series = df.loc[idx, pi_covariates].agg(tuple, axis=1)
-            df.loc[idx, 'lo_xgb'] = key_series.map(pi['lo'])
-            df.loc[idx, 'hi_xgb'] = key_series.map(pi['hi'])
+            key_series = out.loc[idx, pi_covariates].agg(tuple, axis=1)
+            out.loc[idx, 'lo_xgb'] = key_series.map(pi['lo'])
+            out .loc[idx, 'hi_xgb'] = key_series.map(pi['hi'])
 
-        # Save artifacts
-        if save_artifacts:
+    return out, point_prediction_dict, prediction_interval_dict
 
-            model_path    = f"{artifacts_dir}/model_{g[0]}_{g[1]}.pkl"
-            pi_path       = f"{artifacts_dir}/pi_{g[0]}_{g[1]}.json"
-            meta_path     = f"{artifacts_dir}/meta_{g[0]}_{g[1]}.json"
 
-            meta = {
-                "n_train": int(len(df_all)),
-                "factors": [factor1, factor2],
-                "covariates": covariates, # this indicates order for all variables
-                "covariates_categorical": covariates_categorical, # this indicates categorical variables
-                "cat_dtype_map": cat_dtype_map, #  we need the levels for all categories
-                "target": target,
-                "alpha": alpha
-            }
+def _save_model(model, pi, meta, model_path, pi_path, meta_path):
 
-            _save_model(model, pi, meta, model_path, pi_path, meta_path)
+    joblib.dump(model, model_path)
 
-    return df, point_prediction_dict, prediction_interval_dict
+    with open(pi_path, "w", encoding="utf-8") as f:
+        json.dump(pi, f, indent=2)
+
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+    logger.debug("Saved model -> %s", model_path)
+    logger.debug("Saved PI    -> %s", pi_path)
+    logger.debug("Saved meta  -> %s", meta_path)
+
+def dump_artifacts(
+        artifacts_dir,
+        df,
+        pp_dict,
+        pi_dict,
+        factor1,
+        factor2,
+        alpha
+):
+    for g, df_all in df.groupby([factor1, factor2], observed=True, dropna=False):
+
+        if g not in pp_dict:
+            logging.warning(f"Group {g} not in pp_dict, skipping...")
+            continue
+
+        model = pp_dict[g]
+        pi = pi_dict[g]
+
+        model_path    = f"{artifacts_dir}/model_{g[0]}_{g[1]}.pkl"
+        pi_path       = f"{artifacts_dir}/pi_{g[0]}_{g[1]}.json"
+        meta_path     = f"{artifacts_dir}/meta_{g[0]}_{g[1]}.json"
+
+        meta = {
+            "n_train": int(len(df_all)),
+            "alpha": alpha
+        }
+
+        _save_model(model, pi, meta, model_path, pi_path, meta_path)

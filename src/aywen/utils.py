@@ -5,6 +5,9 @@ import logging
 import os
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
+import json
+from pathlib import Path
+from typing import Dict, Any, Optional, Iterable
 
 
 
@@ -133,16 +136,206 @@ class MonthCycleFeatures(BaseEstimator, TransformerMixin):
         return np.sin(theta - self.phase), np.cos(theta - self.phase)
 
 
-def make_dtype_dict(df: pd.DataFrame):
-    dtype_dict = {}
-    for col in df.columns:
-        if pd.api.types.is_categorical_dtype(df[col]):
-            cat = df[col].dtype
-            # keep categories and order
-            dtype_dict[col] = pd.api.types.CategoricalDtype(
-                categories=cat.categories,
-                ordered=cat.ordered
-            )
+# ------- dtypes functions -------
+
+
+class DtypeManager:
+    """
+    Manage (persist + apply) pandas dtypes, including CategoricalDtype metadata.
+    """
+
+    def __repr__(self):
+        return json.dumps(self.to_json_ready(), indent=2)
+
+    # ---------- Constructors ----------
+    @classmethod
+    def from_df(cls, df: pd.DataFrame) -> "DtypeManager":
+        """Capture dtypes (including categorical categories & order) from df."""
+        dtype_map: Dict[str, Any] = {}
+        for col in df.columns:
+            dt = df[col].dtype
+            if isinstance(dt, pd.CategoricalDtype):
+                dtype_map[col] = pd.CategoricalDtype(
+                    categories=dt.categories,
+                    ordered=dt.ordered
+                )
+            else:
+                dtype_map[col] = dt
+        return cls(dtype_map)
+
+    @classmethod
+    def load(cls, path: str | Path) -> "DtypeManager":
+        """Load from a JSON file produced by save()."""
+        with open(path, "r", encoding="utf-8") as f:
+            data: Dict[str, Any] = json.load(f)
+        return cls(cls._deserialize(data))
+
+    # ---------- Core ----------
+    def __init__(self, dtype_map: Dict[str, Any]):
+        self.dtype_map = dtype_map  # values: np.dtype or pd.CategoricalDtype
+
+    def save(self, path: str | Path) -> None:
+        """
+        Save to JSON. If already serializable, dump as-is; otherwise serialize.
+        """
+        to_dump = (
+            self.dtype_map if self._is_serializable(self.dtype_map)
+            else self._serialize(self.dtype_map)
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(to_dump, f, indent=2)
+
+    def apply(
+        self,
+        df: pd.DataFrame,
+        *,
+        strict: bool = False,
+        include: Optional[Iterable[str]] = None,
+        exclude: Optional[Iterable[str]] = [],
+        copy: bool = True,
+        drop_extras: bool = False,   # drop columns not in the schema
+    ) -> pd.DataFrame:
+        """
+        Cast df to stored dtypes, align columns to the schema's order,
+        and ensure the resulting DataFrame has the same columns and order
+        as the schema (or the include/exclude-filtered subset).
+
+        - strict=True: error if df is missing any required columns (after include/exclude).
+        - include/exclude: limit which stored columns to use (order still follows schema).
+        - drop_extras=True: drop columns not present in the schema subset.
+        - fill_missing=True: add missing columns (if not strict) with NA/NaT and
+          a null-friendly dtype.
+        - copy=True: return a copy (default) or modify df in place.
+        """
+        target = df.copy() if copy else df
+
+        # Determine the target column order from schema (respect include/exclude)
+        ordered_cols = list(self._select_columns(include, exclude))
+
+        # Strict check for missing columns
+        missing = [c for c in ordered_cols if c not in target.columns]
+        if strict and missing:
+            raise KeyError(f"Missing columns in df: {missing}")
+
+        if not strict and missing:
+            exclude = exclude + missing
+            ordered_cols = list(self._select_columns(include, exclude))
+
+        # Build cast map for columns that exist now
+        cast_map: Dict[str, Any] = {c: self.dtype_map[c] for c in ordered_cols if c in target.columns}
+
+        # Cast (keeps categories & order for categoricals; unknowns become NaN)
+        target = target.astype(cast_map, copy=False)
+
+        # Reorder & optionally drop extras
+        if drop_extras:
+            target = target.reindex(columns=ordered_cols)
         else:
-            dtype_dict[col] = df[col].dtype
-    return dtype_dict
+            # Keep extras, but move schema columns to the front in schema order
+            extras = [c for c in target.columns if c not in ordered_cols]
+            target = target.loc[:, ordered_cols + extras]
+
+        return target
+
+    # ---------- Helpers ----------
+    @staticmethod
+    def _is_serializable(dtype_map: Dict[str, Any]) -> bool:
+        """True if dtype_map looks JSON-ready (i.e., dicts of simple types)."""
+        def ok(v: Any) -> bool:
+            if isinstance(v, dict):
+                return "type" in v and (
+                    (v["type"] == "other" and "dtype" in v) or
+                    (v["type"] == "category" and "categories" in v and "ordered" in v)
+                )
+            return False
+        return all(ok(v) for v in dtype_map.values())
+
+    @staticmethod
+    def _serialize(dtype_map: Dict[str, Any]) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        for col, dt in dtype_map.items():
+            if isinstance(dt, pd.CategoricalDtype):
+                out[col] = {
+                    "type": "category",
+                    "categories": dt.categories.tolist(),
+                    "ordered": bool(dt.ordered),
+                }
+            else:
+                out[col] = {"type": "other", "dtype": str(np.dtype(dt))}
+        return out
+
+    @staticmethod
+    def _deserialize(data: Dict[str, Any]) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        for col, info in data.items():
+            if info["type"] == "category":
+                out[col] = pd.CategoricalDtype(
+                    categories=info["categories"],
+                    ordered=info["ordered"],
+                )
+            else:
+                out[col] = np.dtype(info["dtype"])
+        return out
+
+    def _select_columns(
+        self,
+        include: Optional[Iterable[str]],
+        exclude: Optional[Iterable[str]],
+    ) -> Iterable[str]:
+        cols = list(self.dtype_map.keys())
+        if include is not None:
+            inc = set(include)
+            cols = [c for c in cols if c in inc]
+        if exclude is not None:
+            excl = set(exclude)
+            cols = [c for c in cols if c not in excl]
+        return cols
+
+    @staticmethod
+    def _make_missing_series(n: int, dtype: Any, index=None) -> pd.Series:
+        """Create a length-n Series of NA/NaT with a dtype that can hold missing."""
+        if isinstance(dtype, pd.CategoricalDtype):
+            return pd.Series(
+                pd.Categorical([pd.NA] * n, categories=dtype.categories, ordered=dtype.ordered),
+                index=index,
+                name=None
+            )
+
+        npdt = np.dtype(dtype)
+
+        # datetime/timedelta -> NaT
+        if npdt.kind in ("M", "m"):  # datetime64/timedelta64
+            return pd.Series(pd.NaT, index=index, dtype=npdt)
+
+        # floats can hold NaN directly
+        if npdt.kind == "f":
+            return pd.Series(np.nan, index=index, dtype=npdt)
+
+        # booleans -> pandas nullable boolean
+        if npdt.kind == "b":
+            return pd.Series(pd.NA, index=index, dtype=pd.BooleanDtype())
+
+        # integers/unsigned -> pandas nullable integer with matching width
+        if npdt.kind in ("i", "u"):
+            bits = npdt.itemsize * 8
+            dtype_str = f"Int{bits}" if npdt.kind == "i" else f"UInt{bits}"
+            return pd.Series(pd.NA, index=index, dtype=dtype_str)
+
+        # string/object -> object with NA
+        if npdt.kind in ("O", "U", "S"):
+            return pd.Series(pd.NA, index=index, dtype="object")
+
+        # fallback: object
+        return pd.Series(pd.NA, index=index, dtype="object")
+
+    # ---------- Convenience ----------
+    def to_dict(self) -> Dict[str, Any]:
+        """Return the in-memory dtype map (np.dtype / CategoricalDtype values)."""
+        return self.dtype_map.copy()
+
+    def to_json_ready(self) -> Dict[str, Any]:
+        """Return a JSON-serializable representation without writing to disk."""
+        return self._serialize(self.dtype_map)
+
+
+

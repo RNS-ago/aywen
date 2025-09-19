@@ -1,16 +1,72 @@
 import logging
+import math
 import pandas as pd
-from aywen.features import add_fuel_to_df, nocturnal
 import numpy as np
 import geopandas as gpd
 import os
 import richdem as rd
 from pyproj import Transformer
 from tqdm import tqdm
+from sklearn.model_selection import train_test_split
 from aywen.utils import TimeOfDayFeatures
 
-
 logger = logging.getLogger("aywen_logger")
+
+# --------------- miscellaneous ---------------
+
+# constants.py
+
+ID_COLUMNS = ["fire_id"]
+
+GEOSPATIAL_COLUMNS = ["longitude", "latitude"]
+
+TIMESTAMP_COLUMNS = ["start_datetime"]
+
+FACTORS = ["zone_WE", "zone_NS"]
+
+TARGETS = ["propagation_speed_mm", "dt_minutes", "initial_radius_m"]
+
+COVARIATES = [
+    "temperature",
+    "wind_speed_kmh",
+    "relative_humidity",
+    "slope_degrees",
+    "sin_hour",
+    "cos_hour",
+    "initial_fuel_reduced",
+    "day_night",
+    "high_season",
+]
+
+COVARIATES_CATEGORICAL = [
+    "initial_fuel_reduced",
+    "day_night",
+    "high_season",
+]
+
+PI_COVARIATES = [
+    "day_night",
+    "high_season",
+]
+
+SPLIT_COLUMNS = ["split2", "split3"]
+
+OTHERS = ["target_zone"]
+
+DEFAULT_COLUMNS = {
+    "id": ID_COLUMNS,
+    "geospatial": GEOSPATIAL_COLUMNS,
+    "timestamp": TIMESTAMP_COLUMNS,
+    "factors": FACTORS,
+    "covariates": COVARIATES,
+    "covariates_categorical": COVARIATES_CATEGORICAL,
+    "pi_covariates": PI_COVARIATES,
+    "targets": TARGETS,
+    "split": SPLIT_COLUMNS,
+    "others": OTHERS,
+}
+
+
 
 # --------------- zone ---------------
 
@@ -21,6 +77,7 @@ def add_zones_to_df(df,
     lat_col: str = "latitude",
     zone_col: str = "area",
     new_zone_col: str = "zone_alert",
+    zone_threshold: int = 0,
     ) -> pd.DataFrame:
     """
     Add the zone to a DataFrame containing the coordinates based on a shapefile.
@@ -101,8 +158,13 @@ def add_zones_to_df(df,
     gdf = gdf.rename(columns={zone_col: new_zone_col})
     gdf = gdf.drop(columns=["index_right", "geometry"])
 
+    # drop factor with few observations
+    if zone_threshold > 0:
+        gdf = gdf[gdf[new_zone_col].map(gdf[new_zone_col].value_counts()) > zone_threshold]
+        logger.info("Row count changed after dropping low-frequency zones: %d", len(gdf))
+
     if gdf.empty:
-        logger.info("None of the coordintes were in the regions in the shapefile")
+        logger.info("None of the coordinates were in the regions in the shapefile")
         return None
     else:
         logger.info("Added %s", new_zone_col)
@@ -496,6 +558,7 @@ def add_high_season_to_df(
 
 # --------------- fuel ---------------
 
+
 def add_fuel_to_df(
         df: pd.DataFrame,
         fuel_tiff_path: str,
@@ -519,18 +582,21 @@ def add_fuel_to_df(
     if not os.path.exists(fuel_tiff_path):
         raise FileNotFoundError(f"Fuel GeoTIFF file not found: {fuel_tiff_path}")
 
-    # 1) Load fuel data from GeoTIFF
-    #fuel_data = load_fuel_data(fuel_tiff_path, lon_col, lat_col)
-    fuel_data = df[['longitude', 'latitude']].copy()
-    fuel_data[fuel_col] = 'matorral__arbustos_y_oespecies'  # Placeholder for actual fuel data loading logic
-    # 2) Merge with main DataFrame
-    df = df.merge(fuel_data, on=["longitude", "latitude"], how="left")
-    logger.info(f"Added {fuel_col}.")
+    if fuel_col not in out.columns:
+        fuel_data = out[['longitude', 'latitude']].copy()
+        fuel_data[fuel_col] = 'matorral__arbustos_y_oespecies'  # Placeholder for actual fuel data loading logic
+        out = out.merge(fuel_data, on=["longitude", "latitude"], how="left")
+        logger.info(f"Added {fuel_col}.")
+    else:
+        logger.info(f"Column {fuel_col} already exists, skipping addition.")
 
-    return df
+    out[fuel_col] = pd.Categorical(out[fuel_col], categories=out[fuel_col].unique())
+    
+
+    return out
 
 
-def add_fuel_reduced(
+def _old_add_fuel_reduced(
         df: pd.DataFrame,
         fuel_col: str = "initial_fuel",
        fuel_reduced_col: str = "initial_fuel_reduced",
@@ -568,9 +634,75 @@ def add_fuel_reduced(
 
     return out
 
+def _reduce_fuel_types(s: pd.Series, min_fuel_samples) -> pd.Series:
+    """Collapse rare levels in s to 'other'. Accepts int or fraction."""
+    if min_fuel_samples < 1:
+        n = s.size
+        min_fuel_samples = max(1, math.ceil(min_fuel_samples * n))
+        logger.debug("min_fuel_samples as fraction -> %d samples", min_fuel_samples)
+
+    counts = s.value_counts()
+    rare = counts[counts < min_fuel_samples].index
+    logger.debug("Number of rare fuel types: %s", len(rare))
+    return s.replace(rare, 'other')
+
+
+def add_fuel_reduced(
+        df: pd.DataFrame,
+        factor1: str = "zone_WE",
+        factor2: str = "zone_NS",
+        fuel_col: str = "initial_fuel",
+        fuel_reduced_col: str = "initial_fuel_reduced",
+        min_fuel_samples: int = 15
+) -> pd.DataFrame:
+    """
+    Reduce the number of categories in the fuel column by grouping rare categories into 'Other'.
+    
+    Parameters:
+        df (pd.DataFrame): The DataFrame containing the fuel column.
+        fuel_col (str): The name of the column containing the fuel types.
+        fuel_reduced_col (str): The name of the new column to create with reduced fuel types.
+        min_fuel_samples (int): Minimum number of samples for a category to be kept; otherwise grouped into 'Other'.
+    
+    Returns:
+        pd.DataFrame: The DataFrame with the new reduced fuel column.
+    """
+
+    #--- Call args (debug) ---
+    logger.debug("called with df.shape=%s, fuel_col=%s, fuel_reduced_col=%s, min_fuel_samples=%s",
+        df.shape, fuel_col, fuel_reduced_col, min_fuel_samples
+    )
+
+    # create a copy
+    out = df.copy()
+
+    out['tmp'] = (out[fuel_col]
+       .astype(str)
+       .str.replace('-', '', regex=False)
+       .str.replace(' ', '_', regex=False)
+       .str.replace(',', '_', regex=False)
+       .str.replace('>', 'gt_', regex=False)
+       .str.replace('<', 'lt_', regex=False)
+       .str.replace('=', 'eq_', regex=False)
+       .str.replace('.', '', regex=False)
+       .str.lower()
+    )
+
+    # groupwise reduction (aligned back to original index)
+    out[fuel_reduced_col] = out['tmp'].groupby([out[factor1], out[factor2]], observed=True).transform(lambda g: _reduce_fuel_types(g, min_fuel_samples=min_fuel_samples))
+    out = out.drop(columns=['tmp'])
+    out[fuel_reduced_col] = pd.Categorical(out[fuel_reduced_col], categories=out[fuel_reduced_col].unique())
+
+    kept = out[fuel_reduced_col].nunique(dropna=True)
+    original = df[fuel_col].nunique(dropna=True)
+    logger.info("Fuel categories reduced: %d (from %d).", kept, original)
+    logger.info("Added %s.", fuel_reduced_col)
+
+    return out
+
+
 
 # --------------- weather ---------------
-
 def _get_weather_data(
     folder: str = "G:/Shared drives/OpturionHome/AraucoFire/2_data/processed/",
     filename: str = "Incendios_2014-2025_VHT_v3.csv",
@@ -1010,6 +1142,95 @@ def add_propagation_speed_to_df(
     return (out, summary) if return_summary else out
 
 
+# ----------- train-validate-test split -------
+
+
+
+def train_test_split_per_zone(df, zone_col="zone_alert", test_frac=0.20, val_frac=0.20, random_state=42):
+    """
+    Returns df_train, df_val, df_test with disjoint indices.
+    Splits are performed independently within each zone.
+    """
+    parts = []
+    for z, dfz in df.groupby(zone_col, observed=False):
+        # test split within this zone
+        df_temp, df_test = train_test_split(
+            dfz, test_size=test_frac, random_state=random_state, shuffle=True
+        )
+        # validation split within the remaining data
+        val_size_rel = val_frac / (1.0 - test_frac)  # so overall val ~= val_frac
+        df_train, df_val = train_test_split(
+            df_temp, test_size=val_size_rel, random_state=random_state, shuffle=True
+        )
+
+        df_train = df_train.copy(); df_train["dataset"] = "train"
+        df_val   = df_val.copy();   df_val["dataset"]   = "val"
+        df_test  = df_test.copy();  df_test["dataset"]  = "test"
+
+        parts.append((df_train, df_val, df_test))
+
+    # concat all zones back
+    df_train = pd.concat([p[0] for p in parts]).sort_index()
+    df_val   = pd.concat([p[1] for p in parts]).sort_index()
+    df_test  = pd.concat([p[2] for p in parts]).sort_index()
+
+    logger.debug("Train=%s, Val=%s, Test=%s", len(df_train), len(df_val), len(df_test))
+    return df_train, df_val, df_test
+
+def add_train_test_split_to_df(
+        df: pd.DataFrame,
+        zone_col: str = "zone_alert",
+        factor1: str = "zone_WE",
+        factor2: str = "zone_NS",
+        split2_col : str = "split2",
+        split3_col : str = "split3"
+) -> pd.DataFrame:
+    
+    # --- Call args (debug) ---
+    logger.debug("called with df.shape=%s, zone_col=%s, split2_col=%s, split3_col=%s",
+        df.shape, zone_col, split2_col, split3_col
+    )
+
+    # create a copy
+    out = df.copy()
+
+    # splitting per zone
+    df_train, df_val, df_test = train_test_split_per_zone(df, test_frac=0.20, val_frac=0.20, random_state=42)
+
+    # --- split flags ---
+    out["split3"] = "train"
+    out.loc[out.index.isin(df_val.index), "split3"] = "valid"
+    out.loc[out.index.isin(df_test.index), "split3"] = "test"
+
+    out['split2'] = "train+valid"
+    out.loc[out.index.isin(df_test.index), "split2"] = "test"
+
+    # Optional: drop NaNs to avoid spurious rows
+    df_chk = out.dropna(subset=['initial_fuel_reduced'])
+
+    counts = (df_chk
+        .groupby([factor1, factor2, 'initial_fuel_reduced', 'split3'], observed=True)
+        .size()
+        .unstack('split3', fill_value=0)
+    )
+
+    # ensure train column exists even if there are no train rows at all
+    if 'train' not in counts.columns:
+        counts['train'] = 0
+
+    # rows present somewhere (they all are) but missing in train
+    missing = counts[counts['train'] == 0]
+
+    assert missing.empty, (
+        "Some initial_fuel_reduced levels are missing from the train split:\n"
+        + missing.reset_index()[[factor1, factor2, 'initial_fuel_reduced']].to_string(index=False)
+    )
+
+    logger.info("Added %s and %s.", split2_col, split3_col)
+
+    return out
+
+
 
 # --------------- full pipeline ---------------
 
@@ -1024,23 +1245,29 @@ def feature_engineering_pipeline(
         crs: str = "EPSG:4326",
         zone_shapefile_path: str = None,
         zone_col: str = "area",
+        zone_threshold: int = 5,
         topo_csv_path: str = None,
         target_zone_col: str = "target_zone",
         fuel_tiff_path: str = None,
         fuel_col: str = "initial_fuel",
+        skip_fuel_reduced: bool = False,
+        skip_train_test_split: bool = False,
         skip_weather: bool = False,
         skip_target: bool = False,
         ) -> pd.DataFrame:
 
         out = df.copy()
-        out = add_zones_to_df(out, shapefile_path=zone_shapefile_path, crs=crs, lon_col=lon_col, lat_col=lat_col, zone_col=zone_col, new_zone_col="zone_alert",)
+        out = add_zones_to_df(out, shapefile_path=zone_shapefile_path, crs=crs, lon_col=lon_col, lat_col=lat_col, zone_col=zone_col, new_zone_col="zone_alert", zone_threshold=zone_threshold)
         out = add_splitted_zones_to_df(out, zone_col="zone_alert", separation_keys=["zone_WE", "zone_NS"])
         out = add_sin_cos_hour_to_df(out, datetime_col=datetime_col, sin_col='sin_hour', cos_col='cos_hour')
         out = add_topo_to_df(out, csv_path=topo_csv_path, lon_col=lon_col, lat_col=lat_col, id_col=id_col)
         out = add_nocturnal_to_df(out, target_zone_col=target_zone_col, nocturnal_col='day_night')
         out = add_high_season_to_df(out, datetime_col = datetime_col,high_season_col = 'high_season')
         out = add_fuel_to_df(df = out, fuel_col = fuel_col, fuel_tiff_path=fuel_tiff_path)
-        out = add_fuel_reduced(df = out, fuel_col = fuel_col, fuel_reduced_col = 'initial_fuel_reduced')
+        if not skip_fuel_reduced:
+            out = add_fuel_reduced(df = out, fuel_col = fuel_col, fuel_reduced_col = 'initial_fuel_reduced')
+        if not skip_train_test_split:
+            out = add_train_test_split_to_df(out, zone_col="zone_alert")
         if not skip_weather:
             weather = _get_weather_data() # this will be replaced by an streaming API
             out = _merge_weather_data(out, weather)
