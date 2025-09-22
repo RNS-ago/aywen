@@ -8,6 +8,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 import json
 from pathlib import Path
 from typing import Dict, Any, Optional, Iterable
+import ast
 
 
 
@@ -336,6 +337,47 @@ class DtypeManager:
     def to_json_ready(self) -> Dict[str, Any]:
         """Return a JSON-serializable representation without writing to disk."""
         return self._serialize(self.dtype_map)
+    
+# ------- dictionary -------
+
+def serialize(data: dict) -> dict:
+    """
+    Convert a dict with tuple keys into a JSON-serializable dict.
+    Works recursively for nested dicts.
+    """
+    result = {}
+    for k, v in data.items():
+        # Convert tuple keys to string
+        new_key = str(k) if isinstance(k, tuple) else k
+
+        # If value is dict, recurse
+        if isinstance(v, dict):
+            result[new_key] = serialize(v)
+        else:
+            result[new_key] = v
+    return result
+
+
+def restore(data: dict) -> dict:
+    """
+    Restore a serialized dict back into its original form
+    with tuple keys. Works recursively for nested dicts.
+    """
+    result = {}
+    for k, v in data.items():
+        try:
+            # Try to interpret key as a tuple string
+            new_key = ast.literal_eval(k) if isinstance(k, str) and k.startswith("(") else k
+        except (ValueError, SyntaxError):
+            new_key = k
+
+        # If value is dict, recurse
+        if isinstance(v, dict):
+            result[new_key] = restore(v)
+        else:
+            result[new_key] = v
+    return result
+
 
 
 

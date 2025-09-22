@@ -1,10 +1,11 @@
-
+import numpy as np
 import pandas as pd
 import xgboost as xgb
 import optuna
 import joblib
 import json
 import logging
+from aywen.utils import serialize
 
 logger = logging.getLogger("aywen_logger")
 
@@ -148,79 +149,13 @@ def get_predictive_intervals(model, df, covariates, pi_covariates, target,  alph
         hi = tmp.groupby(pi_covariates, observed=False)["residuals"].quantile(1 - alpha).rename("hi")
    
     return {
-        "lo": lo,
-        "hi": hi
+        "lo": lo.to_dict(),
+        "hi": hi.to_dict()
     }
 
 
-def _ensure_ordered_row(X_row: pd.DataFrame, covariates: list, covariates_categorical: list, cat_dtype_map: dict):
-    """
-    Build a single-row DataFrame with columns exactly as in `covariates`.
-    Extra keys in X_row are ignored; missing keys raise a helpful error.
-    """
-    missing = [c for c in covariates if c not in X_row.columns]
-    if missing:
-        raise ValueError(f"Missing required covariates: {missing}")
-    X_ordered = X_row[covariates].copy()
-    for c in covariates_categorical:
-        if c in X_ordered.columns:
-            X_ordered[c] = pd.Categorical(X_ordered[c], categories=cat_dtype_map[c])
-    return X_ordered
 
 
-def old_eval_point_prediction(X_new, model, covariates, covariates_categorical, cat_dtype_map):
-    
-    # 1) Build ordered, typed row
-    X_ordered = _ensure_ordered_row(X_new, covariates, covariates_categorical, cat_dtype_map)
-
-    # 2) Predict with TreeSHAP
-    dnew = xgb.DMatrix(X_ordered, enable_categorical=True, feature_names=covariates)
-    contribs = model.predict(dnew, pred_contribs=True).reshape(-1)  # [n_features + 1]
-
-    base_value = float(contribs[-1])
-    shap_vals = contribs[:-1]  # length == len(covariates)
-
-    # 3) Margin prediction (apply your link/back-transform if needed)
-    pred_margin = base_value + float(shap_vals.sum())
-
-    # 4) Return as aligned structures
-    shap_dict = {covariates[i]: shap_vals[i] for i in range(len(covariates))}
-    return {
-        "prediction": pred_margin,
-        "base_value": base_value,
-        "shap_values": shap_dict,
-    }
-
-def eval_point_prediction(X_new, model, covariates, mgr):
-    
-    # 1) Build ordered, typed row
-    X_new = X_new[covariates].copy()
-    X_ordered = mgr.apply(X_new[covariates], strict=True, include=covariates).copy()
-
-    # 2) Predict with TreeSHAP
-    dnew = xgb.DMatrix(X_ordered, enable_categorical=True, feature_names=covariates)
-    contribs = model.predict(dnew, pred_contribs=True).reshape(-1)  # [n_features + 1]
-
-    base_value = float(contribs[-1])
-    shap_vals = contribs[:-1]  # length == len(covariates)
-
-    # 3) Margin prediction (apply your link/back-transform if needed)
-    pred_margin = base_value + float(shap_vals.sum())
-
-    # 4) Return as aligned structures
-    shap_dict = {covariates[i]: shap_vals[i] for i in range(len(covariates))}
-    return {
-        "prediction": pred_margin,
-        "base_value": base_value,
-        "shap_values": shap_dict,
-    }
-
-
-def eval_prediction_interval(X_new, model, covariates):
-
-    assert isinstance(model, dict) and "lo" in model and "hi" in model, \
-        "PI model must be a dictionary with keys 'lo' and 'hi'"
-    return model
 
 
 def train_pipeline(
@@ -298,12 +233,52 @@ def train_pipeline(
     return out, point_prediction_dict, prediction_interval_dict
 
 
+def add_base_model_predictions_to_df(
+        df: pd.DataFrame, 
+        factor1: str, 
+        factor2: str, 
+        target: str, 
+        alpha: float = 0.1):
+    
+    # --- Call args (debug) ---
+    logger.debug("called with df.shape=%s, factor1=%s, factor2=%s, target=%s, alpha=%s",
+        df.shape, factor1, factor2, target, alpha)
+    
+    # create a copy
+    out = df.copy()
+
+    # Point Predictions
+    factors = [factor1, factor2]
+    grp_means = df.groupby(factors, observed=False)[target].mean()
+    out['prediction_base'] = out.set_index(factors).index.map(grp_means)
+
+    # Compute residuals
+    out['residual_base'] = out[target] - out['prediction_base']
+
+    # Predictive Intervals
+    grp_quantiles = out.groupby(factors, observed=False)['residual_base'].quantile([alpha, 1-alpha]).unstack()
+    out['lo_base'] = out.set_index(factors).index.map(grp_quantiles[alpha])
+    out['hi_base'] = out.set_index(factors).index.map(grp_quantiles[1-alpha])
+
+    # drop residuals
+    out = out.drop(columns=['residual_base'])
+
+    logger.info("Added %s, %s, %s, %s, %s", 'prediction_base', 'lo_base', 'hi_base', 'residual_base', 'grp_quantiles')
+
+    return out
+
+
+# ------ saving artifacts ------
+
+
 def _save_model(model, pi, meta, model_path, pi_path, meta_path):
 
     joblib.dump(model, model_path)
 
+    pi_serialized = serialize(pi)
+
     with open(pi_path, "w", encoding="utf-8") as f:
-        json.dump(pi, f, indent=2)
+        json.dump(pi_serialized, f, indent=2)
 
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
@@ -319,7 +294,11 @@ def dump_artifacts(
         pi_dict,
         factor1,
         factor2,
-        alpha
+        covariates,
+        pi_covariates,
+        target,
+        alpha,
+        ratio
 ):
     for g, df_all in df.groupby([factor1, factor2], observed=True, dropna=False):
 
@@ -336,7 +315,115 @@ def dump_artifacts(
 
         meta = {
             "n_train": int(len(df_all)),
-            "alpha": alpha
+            "covariates": list(df_all.columns),
+            "covariates": covariates,
+            "pi_covariates": pi_covariates,
+            "target": target,
+            "alpha": alpha,
+            "ratio": ratio
         }
 
         _save_model(model, pi, meta, model_path, pi_path, meta_path)
+
+
+# ---- to be used by the eavluation_model script ----
+
+def eval_point_prediction(X_new, model, covariates, mgr):
+    
+    # 1) Build ordered, typed row
+    X_new = X_new[covariates].copy()
+    X_ordered = mgr.apply(X_new[covariates], strict=True, include=covariates).copy()
+
+    # 2) Predict with TreeSHAP
+    dnew = xgb.DMatrix(X_ordered, enable_categorical=True, feature_names=covariates)
+    contribs = model.predict(dnew, pred_contribs=True).reshape(-1)  # [n_features + 1]
+
+    base_value = float(contribs[-1])
+    shap_vals = contribs[:-1]  # length == len(covariates)
+
+    # 3) Margin prediction (apply your link/back-transform if needed)
+    pred_margin = base_value + float(shap_vals.sum())
+
+    # 4) Return as aligned structures
+    shap_dict = {covariates[i]: shap_vals[i] for i in range(len(covariates))}
+    return {
+        "prediction": pred_margin,
+        "base_value": base_value,
+        "shap_values": shap_dict,
+    }
+
+
+def eval_prediction_interval(X_new, model, covariates):
+
+    assert isinstance(model, dict) and "lo" in model and "hi" in model, \
+        "PI model must be a dictionary with keys 'lo' and 'hi'"
+
+    assert all(c in X_new.columns for c in covariates), "All columns in covariates must be present in X_new"
+    
+    return {
+        "lo": model["lo"].get(tuple(X_new[covariates].values[0]), None) if covariates else model["lo"],
+        "hi": model["hi"].get(tuple(X_new[covariates].values[0]), None) if covariates else model["hi"]
+    }
+
+
+def elliptical_propagation_speed(circular_speed, lo_circular, hi_circular, ratio=3.0):
+
+    major_axis_speed = np.sqrt(ratio)*circular_speed
+    lo_major = np.sqrt(ratio)*lo_circular
+    hi_major = np.sqrt(ratio)*hi_circular
+    lo_major = np.minimum(major_axis_speed, lo_major) # speed cannot be negative
+
+    minor_axis_speed = circular_speed/np.sqrt(ratio)
+    lo_minor = lo_major/ratio
+    hi_minor = hi_major/ratio
+    lo_minor = np.minimum(minor_axis_speed, lo_minor) # speed cannot be negative
+
+    #return major_axis_speed, lo_major, hi_major, minor_axis_speed, lo_minor, hi_minor
+
+    return {
+        "elliptical_speed": major_axis_speed,
+        "lo_elliptical": lo_major,
+        "hi_elliptical": hi_major,
+        "minor_axis_speed": minor_axis_speed,
+        "lo_minor": lo_minor,
+        "hi_minor": hi_minor
+    }
+
+
+def add_elliptical_propagation_speed_to_df(
+    df: pd.DataFrame,
+    circular_col: str = 'prediction_xgb',
+    lo_circular_col: str = "lo_xgb",
+    hi_circular_col: str = "hi_xgb",
+    ratio: float = 3.0
+) -> pd.DataFrame:
+    """
+    Compute elliptical propagation speed and add it to the DataFrame.
+
+    Parameters:
+        df (pd.DataFrame): Input DataFrame containing circular propagation speed.
+        circular_col (str): Column name for circular propagation speed (m/min).
+        lo_circular_col (str): Column name for lower bound of circular speed.
+        hi_circular_col (str): Column name for upper bound of circular speed.
+        ratio (float): Ratio of major to minor axis speeds.
+    Returns:
+        pd.DataFrame: DataFrame with added elliptical propagation speed columns.
+    """
+
+    #--- Call args (debug) ---
+    logger.debug("called with df.shape=%s, circular_col=%s, lo_circular_col=%s, hi_circular_col=%s, ratio=%s",
+        df.shape, circular_col, lo_circular_col, hi_circular_col, ratio
+    )
+
+    # validate
+    for col in [circular_col, lo_circular_col, hi_circular_col]:
+        if col not in df.columns:
+            raise KeyError(f"Column '{col}' not found in df.")
+
+    # create a copy
+    out = df.copy()
+    columns_before = out.columns.tolist()
+    out = out.join(out.apply(lambda row: pd.Series(elliptical_propagation_speed(row[circular_col], row[lo_circular_col], row[hi_circular_col], ratio=ratio)), axis=1))
+    new_cols = [c for c in out.columns if c not in columns_before]
+    logger.info("Added %s", new_cols)
+    return out
