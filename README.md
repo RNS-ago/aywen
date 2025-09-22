@@ -6,15 +6,27 @@ Aywen is a lightweight toolkit for preprocessing, validating, and feature‑engi
 
 ## Requirements
 - Python: >= 3.11
-- Dependencies (installed automatically):
-  - `pandas>=2.3.1`
-  - `numpy>=2.3.2`
+- Dependencies :
   - `geopandas>=1.1.1`
-  - `scikit-learn>=1.7.1`
-  - `tqdm>=4.67.1`
+  - `numpy>=2.0.0`
+  - `optuna>=4.5.0,<5`
+  - `optuna-integration`
+  - `pandas>=2.3.1`
+  - `rasterio>=1.4.3,<2`
   - `richdem>=2.3.0,<3`
+  - `scikit-learn>=1.7.1`
+  - `seaborn>=0.13.2,<0.14`
+  - `shap>=0.48.0,<0.49`
+  - `tqdm>=4.67.1`
+  - `xgboost>=3.0.5,<4`
 
-Note: `richdem` does not provide precompiled wheels through PyPI, so it is installed from conda-forge, thus to use `aywen` it is recommended to use `pixi` or `conda` for environment management and dependency resolution.
+  
+ - Dependencies for development and testing:
+    - `pytest>=8.4.2,<9`
+    - `python-build`
+    - `ipykernel>=6.30.1,<7`
+
+Note: To use `aywen` it is necessary to use a conda based enviroment manager like `pixi` or `conda`, as its dependencies are not available through PyPI.
 
 ## Installation
 
@@ -57,9 +69,12 @@ Once you have built the package, you can install it using conda:
 
 **macOS/Linux (bash):**
 ```bash
-# Create and activate conda environment
+# Create and activate conda environment 
 conda create -n aywen python=3.11
 conda activate aywen
+
+# Install dependencies (Need to be installed manually, when installing from .conda)
+conda install "pandas>=2.3.1" "numpy>=2.3.2" "scikit-learn>=1.7.1" "tqdm>=4.67.1" "richdem>=2.3.0,<3" "optuna>=4.5.0,<5" "optuna-integration" "xgboost>=3.0.5,<4" "seaborn>=0.13.2,<0.14" "geopandas>=1.1.1"
 
 # Install package from local directory
 conda install -c file:///path/to/aywen/dist/conda/aywen-x.x-xxxxxx.conda
@@ -71,6 +86,9 @@ conda install -c file:///path/to/aywen/dist/conda/aywen-x.x-xxxxxx.conda
 # Create and activate conda environment
 conda create -n aywen python=3.11
 conda activate aywen
+
+# Install dependencies (Need to be installed manually, when installing from .conda)
+conda install "pandas>=2.3.1" "numpy>=2.3.2" "scikit-learn>=1.7.1" "tqdm>=4.67.1" "richdem>=2.3.0,<3" "optuna>=4.5.0,<5" "optuna-integration" "xgboost>=3.0.5,<4" "seaborn>=0.13.2,<0.14" "geopandas>=1.1.1"
 
 # Install package from local directory
 conda install -c file:///path/to/aywen/dist/conda/aywen-x.x-xxxxxx.conda
@@ -169,10 +187,8 @@ pixi shell
 # Run tests
 pixi run python -m pytest  # if you have tests
 
-# Build packages
-pixi run build-conda    # Build conda package
-pixi run build-wheel    # Build PyPI wheel
-pixi run build-all      # Build all package types
+# Build conda package
+pixi run build-conda    
 ```
 
 ### For Contributors

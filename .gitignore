@@ -22,3 +22,5 @@ DEVELOPMENT.md
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+*.conda
