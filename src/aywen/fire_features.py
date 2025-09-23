@@ -8,6 +8,9 @@ import richdem as rd
 from pyproj import Transformer
 from tqdm import tqdm
 from aywen.utils import TimeOfDayFeatures
+import rasterio
+from rasterio.warp import transform as rio_transform
+from pandas.api.types import is_categorical_dtype
 
 logger = logging.getLogger("aywen_logger")
 
@@ -50,7 +53,7 @@ PI_COVARIATES = [
 
 SPLIT_COLUMNS = ["split2", "split3"]
 
-OTHERS = ["target_zone", "zone_alert"]
+OTHERS = ["target_zone", "zone_alert", "kitral_fuel_reduced"]
 
 DEFAULT_COLUMNS = {
     "id": ID_COLUMNS,
@@ -64,6 +67,71 @@ DEFAULT_COLUMNS = {
     "split": SPLIT_COLUMNS,
     "others": OTHERS,
 }
+
+CODE_KITRAL = {
+    1: "Pastizales Mesomorficos Densos",
+    2: "Pastizales Mesoomorficos Ralos",
+    3: "Pastizales Higromorficos Densos",
+    4: "Pastizales Higromorficos Ralos",
+    5: "Chacareria Vinedos y Frutales",
+    6: "Matorrales y Arbustos Mesomorficos Densos",
+    7: "Matorrales y Arbustos Mesomorficos Medios y Ralos",
+    8: "Matorrales y Arbustos Higromorficos Densos",
+    9: "Matorrales y Arbustos Higromorificos Medios y Ralos",
+    10: "Formaciones con predominancia de Chuesquea spp",
+    11: "Formaciones con predominancia de Ulex spp",
+    12: "Renovales Nativos diferentes al Tipo Siempreverde",
+    13: "Renovales Nativos del Tipo Siempreverde",
+    14: "Formaciones con predominancia de Alerzales",
+    15: "Formaciones con predominancia de Araucaria",
+    16: "Arbolado Nativo Denso",
+    17: "Arbolado Nativo de Densidad Media",
+    18: "Arbolado Nativo de Densidad Baja",
+    19: "Plantaciones Coniferas Nuevas (0-3) sin Manejo",
+    20: "Plantaciones Coniferas Jovenes (4-11) sin Manejo",
+    21: "Plantaciones Coniferas Adultas (12-17) sin Manejo",
+    22: "Plantaciones Coniferas Mayores (>17) sin Manejo",
+    23: "Plantaciones Coniferas Jovenes (4-11) con Manejo",
+    24: "Plantaciones Coniferas Adultas (12-17) con Manejo",
+    25: "Plantaciones Coniferas Mayores (>17) con Manejo",
+    26: "Plantaciones Eucaliptos Nuevas (0-3)",
+    27: "Plantaciones Eucaliptos Jovenes (4-10)",
+    28: "Plantaciones Eucalipto Adultas (>10)",
+    29: "Plantaciones Latifoliadas y Mixtas",
+    30: "Desechos Explotacion a Tala Rasa de Plantaciones",
+    31: "Desechos Explotacion a Tala Rasa de Bosque Nativo",
+    999: "No combustible",
+}
+
+DEFAULT_TO_KITRAL = {
+    "Bosque nativo": "Arbolado Nativo Denso",
+    "Desecho Agricola": "Desechos Explotacion a Tala Rasa de Plantaciones",
+    "Desecho de Poda": "Desechos Explotacion a Tala Rasa de Plantaciones",
+    "Desecho de Raleo": "Desechos Explotacion a Tala Rasa de Plantaciones",
+    "Desecho de cosecha": "Desechos Explotacion a Tala Rasa de Plantaciones",
+    "Desecho de cosecha nativo": "Desechos Explotacion a Tala Rasa de Bosque Nativo",
+    "Estructurales, Casa, Bodega, etc": "No combustible",
+    "Euca > 8 anos": "Plantaciones Eucalipto Adultas (>10)",
+    "Euca de 0 - 3 anos": "Plantaciones Eucaliptos Nuevas (0-3)",
+    "Euca de 4 - 7 anos": "Plantaciones Eucaliptos Jovenes (4-10)",
+    "Maquinaria Pesada": "No combustible",
+    "Matorral, Arbustos y O.Especies": "Matorrales y Arbustos Mesomorficos Densos",
+    "Otros Combustibles No Vegetales": "No combustible",
+    "Pastizal": "Pastizales Mesomorficos Densos",
+    "Pi > de 14 anos con manejo": "Plantaciones Coniferas Adultas (12-17) con Manejo",
+    "Pi > de 14 anos sin manejo": "Plantaciones Coniferas Adultas (12-17) sin Manejo",
+    "Pi de 0 - 3 anos": "Plantaciones Coniferas Nuevas (0-3) sin Manejo",
+    "Pi de 4 - 7 anos con manejo": "Plantaciones Coniferas Jovenes (4-11) con Manejo",
+    "Pi de 4 - 7 anos sin manejo": "Plantaciones Coniferas Jovenes (4-11) sin Manejo",
+    "Pi de 8 - 13 anos con manejo": "Plantaciones Coniferas Jovenes (4-11) con Manejo",
+    "Pi de 8 - 13 anos sin manejo": "Plantaciones Coniferas Jovenes (4-11) sin Manejo",
+    "Roce": "Desechos Explotacion a Tala Rasa de Plantaciones",
+    "SIN INFORMACION": "No combustible",
+    "Vehiculos de Carga": "No combustible",
+    "Vehiculos de Personal": "No combustible",
+}
+
+
 
 
 
@@ -558,7 +626,164 @@ def add_high_season_to_df(
 # --------------- fuel ---------------
 
 
-def add_fuel_to_df(
+def add_fuel_from_tiff_to_df(
+    df: pd.DataFrame,
+    fuel_tiff_path: str,
+    lon_col: str = "longitude",
+    lat_col: str = "latitude",
+    fuel_col: str = "fuel",
+) -> pd.DataFrame:
+    """
+    Read a GeoTIFF of fuel types and map the raster value at each (lon, lat) in `df`
+    into a new column `fuel_col`.
+
+    Assumptions
+    -----------
+    - `df[lon_col]` and `df[lat_col]` are longitudes and latitudes in WGS84 (EPSG:4326).
+    - The GeoTIFF is single-band (band 1 holds the fuel class/value).
+    - Values outside the raster footprint or equal to the raster's NoData are set to NaN.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input frame with longitude/latitude columns.
+    fuel_tiff_path : str
+        Path to the fuel-type GeoTIFF.
+    lon_col : str
+        Name of the longitude column (degrees).
+    lat_col : str
+        Name of the latitude column (degrees).
+    fuel_col : str
+        Name of the output column to create/overwrite.
+
+    Returns
+    -------
+    pd.DataFrame
+        The original DataFrame with an added column `fuel_col`.
+    """
+    if lon_col not in df.columns or lat_col not in df.columns:
+        raise KeyError(f"DataFrame must contain '{lon_col}' and '{lat_col}' columns.")
+
+    # Copy to avoid mutating caller's frame
+    out = df.copy()
+
+    with rasterio.open(fuel_tiff_path) as src:
+        # Read CRS and NoData
+        raster_crs = src.crs
+        nodata = src.nodata
+        bounds = src.bounds
+
+        # 1) Prepare coordinates in raster CRS (dataset expects x,y in its own CRS)
+        lons = out[lon_col].to_numpy(dtype=float)
+        lats = out[lat_col].to_numpy(dtype=float)
+
+        # If the raster is not already EPSG:4326, project the coordinates
+        if raster_crs is not None and raster_crs.to_string().upper() not in {"EPSG:4326", "OGC:CRS84"}:
+            xs, ys = rio_transform({"init": "EPSG:4326"}, raster_crs, lons.tolist(), lats.tolist())
+            xs = np.asarray(xs)
+            ys = np.asarray(ys)
+        else:
+            xs, ys = lons, lats
+
+        # 2) Quickly filter to points within raster bounds to avoid sampling errors
+        in_bounds = (
+            (xs >= bounds.left)
+            & (xs <= bounds.right)
+            & (ys >= bounds.bottom)
+            & (ys <= bounds.top)
+        )
+
+        # Prepare the result array
+        values = np.full(xs.shape[0], np.nan, dtype=float)
+
+        # 3) Sample band 1 at valid points (batched for speed)
+        if in_bounds.any():
+            coords = list(zip(xs[in_bounds], ys[in_bounds]))
+            # rasterio.sample returns an iterator of arrays of shape (bands,)
+            sampled = list(src.sample(coords))
+            sampled = np.array(sampled)  # shape (N, bands)
+            band1 = sampled[:, 0].astype(float)
+
+            # Convert NoData to NaN
+            if nodata is not None:
+                band1 = np.where(band1 == nodata, np.nan, band1)
+
+            # Assign back to full result
+            values[in_bounds] = band1
+
+        # 4) Attach to DataFrame
+        out[fuel_col] = values
+
+    return out
+
+
+def add_kitral_fuel_to_df(
+        df: pd.DataFrame,
+        fuel_tiff_path: str,
+        lon_col: str = "longitude",
+        lat_col: str = "latitude",
+        fuel_col : str = "kitral_fuel",
+) -> pd.DataFrame:
+    """
+    Add a fuel column to the DataFrame by reading from a GeoTIFF and mapping codes to descriptions.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame with longitude and latitude columns.
+    fuel_tiff_path : str
+        Path to the GeoTIFF file containing fuel codes.
+    lon_col : str
+        Name of the longitude column in df.
+    lat_col : str
+        Name of the latitude column in df.
+    fuel_col : str
+        Name of the output column to create with fuel descriptions.
+
+    Returns
+    -------
+    pd.DataFrame
+        The original DataFrame with an added column `fuel_col` containing fuel descriptions.
+    """
+
+    #--- Call args (debug) ---
+    logger.debug("called with df.shape=%s, fuel_tiff_path=%s, lon_col=%s, lat_col=%s, fuel_col=%s",
+        df.shape, fuel_tiff_path, lon_col, lat_col, fuel_col
+    )
+    
+    # create a copy
+    out = df.copy()
+
+    if fuel_col in out.columns:
+        logger.info("Column %s already exists in df, it will NOT be overwritten.", fuel_col)
+        return out
+    
+    if not os.path.exists(fuel_tiff_path):
+        raise FileNotFoundError(f"Fuel GeoTIFF file not found: {fuel_tiff_path}")
+
+    if fuel_col not in out.columns:
+        out = add_fuel_from_tiff_to_df(
+            out,
+            fuel_tiff_path,
+            lon_col=lon_col,
+            lat_col=lat_col,
+            fuel_col=fuel_col,
+        )
+        logger.info("Added %s.", fuel_col)
+    else:
+        logger.info("Column %s already exists, skipping addition.", fuel_col)
+
+    # Map codes to descriptions using CODE_KITRAL
+    out[fuel_col] = out[fuel_col].map(CODE_KITRAL).fillna("Unknown")
+
+    # Convert to categorical with all possible categories
+    all_categories = list(CODE_KITRAL.values()) + ["Unknown"]
+    out[fuel_col] = pd.Categorical(out[fuel_col], categories=all_categories)
+
+    return out
+
+
+def _old_add_fuel_to_df(
         df: pd.DataFrame,
         fuel_tiff_path: str,
         lon_col: str = "longitude",
@@ -589,6 +814,9 @@ def add_fuel_to_df(
     else:
         logger.info(f"Column {fuel_col} already exists, skipping addition.")
 
+    
+    # Map codes to descriptions using DEFAULT_FUEL_MAP
+    out[fuel_col] = out[fuel_col].map(DEFAULT_TO_KITRAL).fillna("Unknown")
     out[fuel_col] = pd.Categorical(out[fuel_col], categories=out[fuel_col].unique())
     
 
@@ -633,7 +861,27 @@ def _old_add_fuel_reduced(
 
     return out
 
-def _reduce_fuel_types(s: pd.Series, min_fuel_samples) -> pd.Series:
+def map_default_to_kitral(df: pd.DataFrame, fuel_col: str) -> pd.Series:
+    """Map default fuel descriptions to Kitral codes."""
+
+    #--- Call args (debug) ---
+    logger.debug("called with df.shape=%s, fuel_col=%s", df.shape, fuel_col)
+
+    # create a copy
+    out = df.copy()
+
+    if fuel_col not in out.columns:
+        raise KeyError(f"Column {fuel_col} not found in df.")
+    
+    # Map codes to descriptions using DEFAULT_FUEL_MAP
+    out[fuel_col] = out[fuel_col].map(DEFAULT_TO_KITRAL).fillna("Unknown")
+    all_categories = list(CODE_KITRAL.values()) + ["Unknown"]
+    out[fuel_col] = pd.Categorical(out[fuel_col], categories=all_categories)
+    
+    return out
+
+
+def _old_reduce_fuel_types(s: pd.Series, min_fuel_samples) -> pd.Series:
     """Collapse rare levels in s to 'other'. Accepts int or fraction."""
     if min_fuel_samples < 1:
         n = s.size
@@ -643,7 +891,48 @@ def _reduce_fuel_types(s: pd.Series, min_fuel_samples) -> pd.Series:
     counts = s.value_counts()
     rare = counts[counts < min_fuel_samples].index
     logger.debug("Number of rare fuel types: %s", len(rare))
+    s.cat.rename_categories(lambda x: x.replace(rare, 'other'), inplace=True)
     return s.replace(rare, 'other')
+
+
+def _reduce_fuel_types(s: pd.Series, min_fuel_samples, other_label: str = "other") -> pd.Series:
+    """
+    Collapse rare levels in s to `other_label`. `min_fuel_samples` accepts an int or a fraction in (0,1).
+    Returns a categorical Series with unused categories removed.
+    """
+    s = s.copy()
+
+    # Ensure categorical dtype (so we keep categories after recoding)
+    if not is_categorical_dtype(s.dtype):
+        s = s.astype("category")
+
+    # Convert fraction -> absolute threshold
+    if isinstance(min_fuel_samples, (float, int)) and min_fuel_samples < 1:
+        n = s.size
+        min_fuel_samples = max(1, math.ceil(min_fuel_samples * n))
+
+    # Count per level (NaNs excluded by default; change dropna=False if desired)
+    counts = s.value_counts(dropna=True)
+    rare = counts[counts < min_fuel_samples].index
+
+    # Optionally avoid collapsing the target label itself if present
+    if len(rare) == 0:
+        return s
+
+    # 1) Make sure `other_label` is a valid category
+    if other_label not in s.cat.categories:
+        s = s.cat.add_categories([other_label])
+
+    # 2) Assign rare levels to "other" (no .replace to avoid FutureWarning)
+    mask = s.isin(rare)
+    if mask.any():
+        s.loc[mask] = other_label
+
+    # 3) Drop categories that are no longer used
+    s = s.cat.remove_unused_categories()
+
+    return s
+
 
 
 def add_fuel_reduced(
@@ -675,21 +964,21 @@ def add_fuel_reduced(
     # create a copy
     out = df.copy()
 
-    out['tmp'] = (out[fuel_col]
-       .astype(str)
-       .str.replace('-', '', regex=False)
-       .str.replace(' ', '_', regex=False)
-       .str.replace(',', '_', regex=False)
-       .str.replace('>', 'gt_', regex=False)
-       .str.replace('<', 'lt_', regex=False)
-       .str.replace('=', 'eq_', regex=False)
-       .str.replace('.', '', regex=False)
-       .str.lower()
-    )
+    # out['tmp'] = (out[fuel_col]
+    #    .astype(str)
+    #    .str.replace('-', '', regex=False)
+    #    .str.replace(' ', '_', regex=False)
+    #    .str.replace(',', '_', regex=False)
+    #    .str.replace('>', 'gt_', regex=False)
+    #    .str.replace('<', 'lt_', regex=False)
+    #    .str.replace('=', 'eq_', regex=False)
+    #    .str.replace('.', '', regex=False)
+    #    .str.lower()
+    # )
 
     # groupwise reduction (aligned back to original index)
-    out[fuel_reduced_col] = out['tmp'].groupby([out[factor1], out[factor2]], observed=True).transform(lambda g: _reduce_fuel_types(g, min_fuel_samples=min_fuel_samples))
-    out = out.drop(columns=['tmp'])
+    out[fuel_reduced_col] = out[fuel_col].groupby([out[factor1], out[factor2]], observed=True).transform(lambda g: _reduce_fuel_types(g, min_fuel_samples=min_fuel_samples))
+    #out = out.drop(columns=['tmp'])
     out[fuel_reduced_col] = pd.Categorical(out[fuel_reduced_col], categories=out[fuel_reduced_col].unique())
 
     kept = out[fuel_reduced_col].nunique(dropna=True)
@@ -1157,7 +1446,9 @@ def feature_engineering_pipeline(
         target_zone_col: str = "target_zone",
         fuel_tiff_path: str = None,
         fuel_col: str = "initial_fuel",
-        skip_fuel_reduced: bool = False,
+        kitral_col: str = "kitral_fuel",
+        skip_default_fuel: bool = False,
+        skip_kitral_fuel: bool = False,
         skip_weather: bool = False,
         skip_target: bool = False,
         ) -> pd.DataFrame:
@@ -1169,9 +1460,12 @@ def feature_engineering_pipeline(
         out = add_topo_to_df(out, csv_path=topo_csv_path, lon_col=lon_col, lat_col=lat_col, id_col=id_col)
         out = add_nocturnal_to_df(out, target_zone_col=target_zone_col, nocturnal_col='day_night')
         out = add_high_season_to_df(out, datetime_col = datetime_col,high_season_col = 'high_season')
-        out = add_fuel_to_df(df = out, fuel_col = fuel_col, fuel_tiff_path=fuel_tiff_path)
-        if not skip_fuel_reduced:
-            out = add_fuel_reduced(df = out, fuel_col = fuel_col, fuel_reduced_col = 'initial_fuel_reduced')    
+        if not skip_default_fuel:
+            out = map_default_to_kitral(out, fuel_col=fuel_col)
+            out = add_fuel_reduced(df = out, fuel_col = fuel_col, fuel_reduced_col = 'initial_fuel_reduced')
+        if not skip_kitral_fuel:
+            out = add_kitral_fuel_to_df(out, fuel_tiff_path=fuel_tiff_path, lon_col=lon_col, lat_col=lat_col, fuel_col=kitral_col)
+            out = add_fuel_reduced(df = out, fuel_col = kitral_col, fuel_reduced_col = 'kitral_fuel_reduced')
         if not skip_weather:
             weather = _get_weather_data() # this will be replaced by an streaming API
             out = _merge_weather_data(out, weather)

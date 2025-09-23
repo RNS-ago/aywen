@@ -58,6 +58,7 @@ optuna = ">=4.5.0,<5"
 optuna-integration = "*"
 xgboost = ">=3.0.5,<4"
 seaborn = ">=0.13.2,<0.14"
+rasterio = ">=1.4.3,<2"
 
 # --- Pixi "build a conda package" configuration ---
 # This is the key new section: it tells Pixi how to turn your Python package into a .conda.
