@@ -10,7 +10,6 @@ from tqdm import tqdm
 from aywen.utils import TimeOfDayFeatures
 import rasterio
 from rasterio.warp import transform as rio_transform
-from pandas.api.types import is_categorical_dtype
 
 logger = logging.getLogger("aywen_logger")
 
@@ -903,7 +902,7 @@ def _reduce_fuel_types(s: pd.Series, min_fuel_samples, other_label: str = "other
     s = s.copy()
 
     # Ensure categorical dtype (so we keep categories after recoding)
-    if not is_categorical_dtype(s.dtype):
+    if not isinstance(s.dtype, pd.CategoricalDtype):
         s = s.astype("category")
 
     # Convert fraction -> absolute threshold

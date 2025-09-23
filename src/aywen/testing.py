@@ -10,7 +10,7 @@ import numpy as np
 logger = logging.getLogger("aywen_logger")
 
 
-def test_df(
+def assert_df(
         new_df: pd.DataFrame, 
         old_df: pd.DataFrame,
         time_cols: list = [],
@@ -45,7 +45,7 @@ def test_df(
     assert_frame_equal(left, right, check_dtype=False, check_like=True)
 
 
-def test_df_from_file(
+def assert_df_from_file(
         df : pd.DataFrame,
         filename : str,
         time_cols: list = [],
@@ -63,12 +63,12 @@ def test_df_from_file(
     include = [col for col, dt in mgr.to_dict().items() if isinstance(dt, pd.CategoricalDtype)]
     old_df = mgr.apply(old_df, drop_extras=False, include=include)
 
-    # Call test_df
-    test_df(df, old_df, time_cols=time_cols, exclude_cols=exclude_cols)
+    # Call assert_df
+    assert_df(df, old_df, time_cols=time_cols, exclude_cols=exclude_cols)
 
 
 
-def test_predictions_match(df, pp_dict, covariates, factor1, factor2):
+def assert_predictions_match(df, pp_dict, covariates, factor1, factor2):
     
     # Load schema
     mgr = DtypeManager.from_df(df[covariates])
