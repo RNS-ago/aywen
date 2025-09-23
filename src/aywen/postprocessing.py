@@ -5,7 +5,17 @@ from aywen.fire_features import DEFAULT_COLUMNS
 
 logger = logging.getLogger("aywen_logger")
 
-def row_filter(df, thresholds):
+# Column definitions
+ZONE_ALERT_COL = 'zone_alert'
+
+ZONE_FACTOR_COLS = ['zone_WE', 'zone_NS']
+ZONE_FACTOR_LEVELS = {
+    'zone_WE': ['Costa', 'Valle', 'Cordillera'],
+    'zone_NS': ['1', '2', '3', '4', '5']
+}
+
+
+def filter_rows_by_range(df, thresholds):
     """
     Filter DataFrame rows based on upper and lower thresholds for one or more columns.
 
@@ -39,6 +49,56 @@ def row_filter(df, thresholds):
         logger.info("Filtering %s with bounds %s. Remaining rows: %d", col, bounds, mask.sum())
 
     return out[mask]
+
+def postprocess_zone_factors(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preprocess zone factors (zone_WE and zone_NS) by handling missing values
+    and converting to categorical variables.
+    """
+    df = df.copy()
+    
+    # Handle missing values in zone factors
+    if df[ZONE_FACTOR_COLS].isnull().any().any():
+        initial_rows = len(df)
+        df = df.dropna(subset=ZONE_FACTOR_COLS, how='any')
+        logger.info(f"Dropped {initial_rows - len(df)} rows with missing zone factors")
+    
+    if df.empty:
+        raise ValueError("No rows remaining after filtering zone factors")
+    
+    # Clean and validate zone_NS (ensure it's clean integer-like strings)
+    df['zone_NS'] = pd.to_numeric(df['zone_NS'], errors='coerce').astype('Int64').astype(str)
+    
+    # Validate factor levels
+    for factor_col in ZONE_FACTOR_COLS:
+        expected_levels = ZONE_FACTOR_LEVELS[factor_col]
+        actual_levels = set(df[factor_col].astype(str).unique())
+        unexpected_levels = actual_levels - set(expected_levels)
+        
+        if unexpected_levels:
+            raise ValueError(f"{factor_col} contains unexpected levels: {sorted(unexpected_levels)}")
+        
+        # Convert to categorical with explicit ordering
+        df[factor_col] = pd.Categorical(df[factor_col], categories=expected_levels, ordered=True)
+    
+    logger.info("Successfully preprocessed zone factors")
+    return df
+
+def filter_low_observation_zones(df, min_observations):
+    """Filter out zones with few observations."""
+    df = df.copy()
+    initial_rows = len(df)
+    
+    # Get zones that have more than min_observations
+    zone_counts = df[ZONE_ALERT_COL].value_counts()
+    valid_zones = zone_counts[zone_counts > min_observations].index
+    
+    # Filter dataframe to only include valid zones
+    df = df[df[ZONE_ALERT_COL].isin(valid_zones)]
+    
+    logger.info(f"Filtered zones with <={min_observations} observations: "
+                f"{initial_rows - len(df)} rows removed")
+    return df
 
 def drop_missing_rows(df, subset=None):
     """
@@ -162,8 +222,10 @@ def postprocessing_pipeline(df, thresholds=None, zone_col="zone_alert"):
         }
 
     out = df.copy()
+    out = filter_rows_by_range(out, thresholds)
+    out = postprocess_zone_factors(out)
+    out = filter_low_observation_zones(out, min_observations=5)
     out = drop_missing_rows(out)
-    out = row_filter(out, thresholds)
     out = add_train_test_split_to_df(out, zone_col=zone_col)
 
     return out
