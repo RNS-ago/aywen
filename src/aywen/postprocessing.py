@@ -1,7 +1,7 @@
 import pandas as pd
 import logging
 from sklearn.model_selection import train_test_split
-from aywen.fire_features import DEFAULT_COLUMNS
+from aywen.fire_features import DEFAULT_COLUMNS_DICT
 
 logger = logging.getLogger("aywen_logger")
 

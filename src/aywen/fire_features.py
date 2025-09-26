@@ -35,26 +35,26 @@ COVARIATES = [
     "sin_hour",
     "cos_hour",
     "initial_fuel_reduced",
-    "day_night",
+    "diurnal_nocturnal",
     "high_season",
 ]
 
 COVARIATES_CATEGORICAL = [
     "initial_fuel_reduced",
-    "day_night",
+    "diurnal_nocturnal",
     "high_season",
 ]
 
 PI_COVARIATES = [
-    "day_night",
+    "diurnal_nocturnal",
     "high_season",
 ]
 
 SPLIT_COLUMNS = ["split2", "split3"]
 
-OTHERS = ["target_zone", "zone_alert", "kitral_fuel_reduced"]
+OTHERS = ["zone_alert", "kitral_fuel_reduced"]
 
-DEFAULT_COLUMNS = {
+DEFAULT_COLUMNS_DICT = {
     "id": ID_COLUMNS,
     "geospatial": GEOSPATIAL_COLUMNS,
     "timestamp": TIMESTAMP_COLUMNS,
@@ -66,6 +66,9 @@ DEFAULT_COLUMNS = {
     "split": SPLIT_COLUMNS,
     "others": OTHERS,
 }
+
+DEFAULT_COLUMNS = ID_COLUMNS + GEOSPATIAL_COLUMNS + TIMESTAMP_COLUMNS + FACTORS + COVARIATES + TARGETS + OTHERS
+
 
 CODE_KITRAL = {
     1: "Pastizales Mesomorficos Densos",
@@ -104,7 +107,7 @@ CODE_KITRAL = {
 
 DEFAULT_TO_KITRAL = {
     "Bosque nativo": "Arbolado Nativo Denso",
-    "Desecho Agricola": "Desechos Explotacion a Tala Rasa de Plantaciones",
+    "Desecho Agricola": "Matorrales y Arbustos Mesomorficos Medios y Ralos", # feedback from Ignacia
     "Desecho de Poda": "Desechos Explotacion a Tala Rasa de Plantaciones",
     "Desecho de Raleo": "Desechos Explotacion a Tala Rasa de Plantaciones",
     "Desecho de cosecha": "Desechos Explotacion a Tala Rasa de Plantaciones",
@@ -131,7 +134,37 @@ DEFAULT_TO_KITRAL = {
 }
 
 
+# --------------- select columns ---------------
 
+def select_columns_from_df(
+    df: pd.DataFrame,
+    include: list[str] = [],
+    exclude: list[str] = [],
+    strict: bool = False
+) -> pd.DataFrame:
+
+    logger.debug("called with df.shape=%s, include=%s, exclude=%s", df.shape, include, exclude)
+
+    if not strict:
+        include = [col for col in include if col in df.columns]
+        exclude = [col for col in exclude if col in df.columns]
+
+    out = df.copy()
+    if include:
+        missing = [col for col in include if col not in out.columns]
+        if missing:
+            raise KeyError(f"Columns not found in df: {missing}")
+        out = out[include]
+        logger.info("Selected columns: %s", include)
+
+    if exclude:
+        missing = [col for col in exclude if col not in out.columns]
+        if missing:
+            raise KeyError(f"Columns not found in df: {missing}")
+        out = out.drop(columns=exclude)
+        logger.info("Excluded columns: %s", exclude)
+
+    return out
 
 
 # --------------- zone ---------------
@@ -450,8 +483,6 @@ def _dem_to_df(
 def add_topo_to_df(
     df: pd.DataFrame,
     *,
-    from_csv: bool = True,
-    from_dem: bool = False,
     csv_path: str | None = None,
     dem_path: str | None = None,
     lon_col: str = "longitude",
@@ -464,22 +495,27 @@ def add_topo_to_df(
 ) -> pd.DataFrame:
     """
     Obtain topographic data (elevation, slope, aspect) either by reading a precomputed CSV
-    or by sampling a DEM, then merge into `df` on `id_col`.
-
-    - If `from_dem=True`, requires `dem_path`; optionally saves the sampled table to `save_topo_csv`.
-    - If `from_csv=True`, requires `csv_path`.
+    or by sampling a DEM, then merge into `df` on `id_col`..
 
     Returns a new DataFrame with topography merged. Pre-existing topo columns
     ('elevation', 'slope_*', 'aspect_degrees') are dropped before merge to keep it idempotent.
     """
 
     #--- Call args (debug) ---
-    logger.debug("called with df.shape=%s, from_csv=%s, from_dem=%s, csv_path=%s, dem_path=%s",
-        df.shape, from_csv, from_dem, csv_path, dem_path
+    logger.debug("called with df.shape=%s, csv_path=%s, dem_path=%s",
+        df.shape, csv_path, dem_path
     )
 
+    from_csv = False
+    from_dem = False
+
+    if csv_path is not None:
+        from_csv = True
+    if dem_path is not None:
+        from_dem = True
+
     if not (from_csv ^ from_dem):
-        raise AssertionError("Exactly one of from_csv or from_dem must be True.")
+        raise AssertionError("Exactly one of csv_path or dem_path must be provided.")
 
     if from_dem:
         if not dem_path:
@@ -503,6 +539,7 @@ def add_topo_to_df(
         if not os.path.exists(csv_path):
             raise FileNotFoundError(f"Topographic CSV not found: {csv_path}")
         topo_df = pd.read_csv(csv_path)
+        logger.info("Loaded topographic table from %s", csv_path)
         if id_col not in topo_df.columns:
             raise KeyError(f"Column '{id_col}' not found in topographic CSV.")
 
@@ -532,6 +569,75 @@ def add_topo_to_df(
     
     return out
 
+# --------------- period of day ---------------
+def _get_period_day(row, datetime_col: str) -> str:
+    # morning from 3:00 to 11:59
+    # afternoon from 12:00 to 17:59
+    # night from 18:00 to 2:59
+
+    hour = pd.to_datetime(row[datetime_col]).hour
+    if 3 <= hour < 12:
+        return "morning"
+    elif 12 <= hour < 18:
+        return "afternoon"
+    else:
+        return "night"
+
+def add_period_day_to_df(
+    df: pd.DataFrame,
+    datetime_col: str = "start_datetime",
+    period_col: str = "period_day"
+    ) -> pd.DataFrame:
+
+    #--- Call args (debug) ---
+    logger.debug("called with df.shape=%s, period_col=%s",
+        df.shape, period_col
+    )
+
+    if datetime_col not in df.columns:
+        raise KeyError(f"Column '{datetime_col}' not found in df.")
+
+    # create a copy
+    out = df.copy()
+    out[period_col] = out.apply(lambda row: _get_period_day(row, datetime_col=datetime_col), axis=1)
+    out[period_col] = pd.Categorical(out[period_col], categories=["morning", "afternoon", "night"], ordered=True)
+
+    logger.info("Added %s.", period_col)
+
+    return out
+
+# --------------- diurnal/nocturnal ---------------
+
+def _get_diurnal_nocturnal(row, datetime_col: str = "start_datetime") -> str:
+    hour = pd.to_datetime(row[datetime_col]).hour
+    if 3 <= hour < 18:
+        return "diurnal"
+    else:
+        return "nocturnal"
+    
+def add_diurnal_nocturnal_to_df(
+    df: pd.DataFrame,
+    datetime_col: str = "start_datetime",
+    diurnal_nocturnal_col: str = "diurnal_nocturnal"
+    ) -> pd.DataFrame:
+
+    #--- Call args (debug) ---
+    logger.debug("called with df.shape=%s, diurnal_nocturnal_col=%s",
+        df.shape, diurnal_nocturnal_col
+    )
+
+    if datetime_col not in df.columns:
+        raise KeyError(f"Column '{datetime_col}' not found in df.")
+
+    # create a copy
+    out = df.copy()
+    out[diurnal_nocturnal_col] = out.apply(lambda row: _get_diurnal_nocturnal(row, datetime_col=datetime_col), axis=1)
+    out[diurnal_nocturnal_col] = pd.Categorical(out[diurnal_nocturnal_col], categories=["diurnal", "nocturnal"], ordered=True)
+
+    logger.info("Added %s.", diurnal_nocturnal_col)
+
+    return out
+
 
 # --------------- nocturnal ---------------
 
@@ -542,7 +648,7 @@ def _get_nocturnal(row, target_zone_col: str = "target_zone") -> str:
     return "Day"
 
 
-def add_nocturnal_to_df(
+def _old_add_nocturnal_to_df(
         df: pd.DataFrame,
         target_zone_col: str = "target_zone",
         nocturnal_col: str = "nocturnal",
@@ -552,6 +658,8 @@ def add_nocturnal_to_df(
 
     Returns a NEW DataFrame with the 'nocturnal' column.
     """
+
+    logger.warning("Function _old_add_nocturnal_to_df is deprecated, use add_period_day_to_df instead.")
 
     #--- Call args (debug) ---
     logger.debug("called with df.shape=%s, target_zone_col=%s, nocturnal_col=%s",
@@ -579,7 +687,7 @@ def _is_high_season(ts):
     """
     m, d = ts.month, ts.day
     
-    # Dec 15 to Dec 31
+    # Dec 15 to Mar 15
     if (m == 12 and d >= 15) or (m == 1) or (m == 2) or (m == 3 and d <= 15):
         return 'high'
     else:
@@ -625,7 +733,7 @@ def add_high_season_to_df(
 # --------------- fuel ---------------
 
 
-def add_fuel_from_tiff_to_df(
+def _old_add_fuel_from_tiff_to_df(
     df: pd.DataFrame,
     fuel_tiff_path: str,
     lon_col: str = "longitude",
@@ -714,6 +822,125 @@ def add_fuel_from_tiff_to_df(
         out[fuel_col] = values
 
     return out
+
+
+def add_fuel_from_tiff_to_df(
+    df: pd.DataFrame,
+    fuel_tiff_path: str,
+    lon_col: str = "longitude",
+    lat_col: str = "latitude",
+    fuel_col: str = "fuel",
+) -> pd.DataFrame:
+    """
+    Read a GeoTIFF of fuel types and map the raster value at each (lon, lat) in `df`
+    into a new column `fuel_col`.
+
+    Assumptions
+    -----------
+    - `df[lon_col]` and `df[lat_col]` are longitudes and latitudes in WGS84 (EPSG:4326).
+    - The GeoTIFF is single-band (band 1 holds the fuel class/value).
+    - Values outside the raster footprint or equal to the raster's NoData are set to NaN.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input frame with longitude/latitude columns.
+    fuel_tiff_path : str
+        Path or URL (supports COG over HTTP/S) to the fuel-type GeoTIFF.
+    lon_col : str
+        Name of the longitude column (degrees).
+    lat_col : str
+        Name of the latitude column (degrees).
+    fuel_col : str
+        Name of the output column to create/overwrite.
+
+    Returns
+    -------
+    pd.DataFrame
+        The original DataFrame with an added column `fuel_col`.
+    """
+    if lon_col not in df.columns or lat_col not in df.columns:
+        raise KeyError(f"DataFrame must contain '{lon_col}' and '{lat_col}' columns.")
+
+    out = df.copy()
+
+    # Adaptive batch size: keep ~20 batches, clamp to [10k, 100k].
+    n = len(out)
+    if n == 0:
+        out[fuel_col] = np.array([], dtype=float)
+        return out
+    batch_size = min(100_000, max(10_000, n // 20))
+
+
+    with rasterio.open(fuel_tiff_path) as src:
+        raster_crs = src.crs
+        nodata = src.nodata
+        bounds = src.bounds
+
+        # Input coords (WGS84)
+        lons = out[lon_col].to_numpy(dtype=float, copy=False)
+        lats = out[lat_col].to_numpy(dtype=float, copy=False)
+
+        # Reproject points if needed (always_xy=True keeps (lon,lat) order)
+        if raster_crs is None:
+            raise ValueError("Raster has no CRS; cannot reproject points.")
+        needs_reproj = str(raster_crs).upper() not in {"EPSG:4326", "OGC:CRS84"}
+        if needs_reproj:
+            transformer = Transformer.from_crs("EPSG:4326", raster_crs, always_xy=True)
+            xs, ys = transformer.transform(lons, lats)
+            xs = np.asarray(xs)
+            ys = np.asarray(ys)
+        else:
+            xs, ys = lons, lats
+
+        # Fast bounds filter to skip sampling outside footprint
+        in_bounds = (
+            (xs >= bounds.left) &
+            (xs <= bounds.right) &
+            (ys >= bounds.bottom) &
+            (ys <= bounds.top)
+        )
+        valid_idx = np.flatnonzero(in_bounds)
+
+        # Prepare output; default NaN
+        values = np.full(n, np.nan, dtype=float)
+
+        if valid_idx.size == 0:
+            out[fuel_col] = values
+            return out
+
+        # Batched sampling to keep memory and Python overhead in check
+        # Use masked=True so we can map NoData/missing to NaN cleanly.
+        band_index = 1
+        for start in range(0, valid_idx.size, batch_size):
+            end = min(start + batch_size, valid_idx.size)
+            idx_batch = valid_idx[start:end]
+
+            # Create a generator of (x,y) without building huge lists
+            def coord_iter():
+                xb = xs[idx_batch]
+                yb = ys[idx_batch]
+                # zip over numpy arrays yields tuples lazily
+                return zip(xb, yb)
+
+            # Stream samples; each is a masked array of shape (1,)
+            # Avoid list() to keep peak memory low; write back as we go
+            for offset, samp in enumerate(src.sample(coord_iter(), indexes=band_index, masked=True)):
+                v = samp[0]  # masked scalar
+                write_pos = idx_batch[offset]
+                if getattr(v, "mask", False):
+                    values[write_pos] = np.nan
+                else:
+                    val = float(v)
+                    if nodata is not None and np.isfinite(val) and val == nodata:
+                        values[write_pos] = np.nan
+                    else:
+                        values[write_pos] = val
+
+            out[fuel_col] = values
+
+    return out
+
 
 
 def add_kitral_fuel_to_df(
@@ -1442,7 +1669,7 @@ def feature_engineering_pipeline(
         zone_col: str = "area",
         zone_threshold: int = 5,
         topo_csv_path: str = None,
-        target_zone_col: str = "target_zone",
+        topo_dem_path: str = None,
         fuel_tiff_path: str = None,
         fuel_col: str = "initial_fuel",
         kitral_col: str = "kitral_fuel",
@@ -1450,14 +1677,15 @@ def feature_engineering_pipeline(
         skip_kitral_fuel: bool = False,
         skip_weather: bool = False,
         skip_target: bool = False,
+        include: list[str] = DEFAULT_COLUMNS+['hour'],
         ) -> pd.DataFrame:
 
         out = df.copy()
         out = add_zones_to_df(out, shapefile_path=zone_shapefile_path, crs=crs, lon_col=lon_col, lat_col=lat_col, zone_col=zone_col, new_zone_col="zone_alert", zone_threshold=zone_threshold)
         out = add_splitted_zones_to_df(out, zone_col="zone_alert", separation_keys=["zone_WE", "zone_NS"])
         out = add_sin_cos_hour_to_df(out, datetime_col=datetime_col, sin_col='sin_hour', cos_col='cos_hour')
-        out = add_topo_to_df(out, csv_path=topo_csv_path, lon_col=lon_col, lat_col=lat_col, id_col=id_col)
-        out = add_nocturnal_to_df(out, target_zone_col=target_zone_col, nocturnal_col='day_night')
+        out = add_topo_to_df(out, csv_path=topo_csv_path, dem_path=topo_dem_path, lon_col=lon_col, lat_col=lat_col, id_col=id_col)
+        out = add_diurnal_nocturnal_to_df(out, datetime_col=datetime_col, diurnal_nocturnal_col='diurnal_nocturnal')
         out = add_high_season_to_df(out, datetime_col = datetime_col,high_season_col = 'high_season')
         if not skip_default_fuel:
             out = map_default_to_kitral(out, fuel_col=fuel_col)
@@ -1473,5 +1701,6 @@ def feature_engineering_pipeline(
             out = add_dt_minutes_to_df(out, dt_column='dt_minutes')
             out = add_surface_to_df(out, radius_col='initial_radius_m')
             out = add_propagation_speed_to_df(out, radius_col='initial_radius_m', dt_col='dt_minutes', speed_col='propagation_speed_mm', add_kmh=True, speed_kmh_col='propagation_speed_kmh')
-
+        out = select_columns_from_df(out, include=include)
+        
         return out

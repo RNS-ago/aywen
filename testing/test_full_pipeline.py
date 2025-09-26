@@ -50,7 +50,7 @@ from aywen.logging_setup import configure_logging
 from aywen.preprocessing import preprocessing_pipeline
 from aywen.fire_features import feature_engineering_pipeline
 from aywen.postprocessing import postprocessing_pipeline
-from aywen.fire_features import DEFAULT_COLUMNS
+from aywen.fire_features import DEFAULT_COLUMNS_DICT
 from aywen.models import train_pipeline,  add_elliptical_propagation_speed_to_df, add_base_model_predictions_to_df
 from aywen.testing import assert_df_from_file, assert_predictions_match
 
@@ -74,14 +74,14 @@ TOPO_CSV_PATH = DATA_PROCESSED + "/topographic_data.csv"
 TIFF_FUEL_PATH = DATA_ORIGINAL + "/tiles_arauco/ModeloCombustible202409/ModeloCombustible202409.tif"
 
 # --- Select columns ---
-id = DEFAULT_COLUMNS["id"]
-geospatial = DEFAULT_COLUMNS["geospatial"]
-timestamp = DEFAULT_COLUMNS["timestamp"]
-factors = DEFAULT_COLUMNS["factors"]
-covariates = DEFAULT_COLUMNS["covariates"]
-targets = DEFAULT_COLUMNS["targets"]
-split = DEFAULT_COLUMNS["split"]
-others = DEFAULT_COLUMNS["others"]
+id = DEFAULT_COLUMNS_DICT["id"]
+geospatial = DEFAULT_COLUMNS_DICT["geospatial"]
+timestamp = DEFAULT_COLUMNS_DICT["timestamp"]
+factors = DEFAULT_COLUMNS_DICT["factors"]
+covariates = DEFAULT_COLUMNS_DICT["covariates"]
+targets = DEFAULT_COLUMNS_DICT["targets"]
+split = DEFAULT_COLUMNS_DICT["split"]
+others = DEFAULT_COLUMNS_DICT["others"]
 columns = id + geospatial + timestamp + factors + covariates + targets + others
 
 # --- Configure logging ---
@@ -95,15 +95,14 @@ fire_df, dispatch_df = preprocessing_pipeline(FIRE_CSVS, DISPATCH_CSVS)
 fire_df_fe = feature_engineering_pipeline(fire_df, zone_shapefile_path=ZONE_SHAPEFILE_PATH, topo_csv_path=TOPO_CSV_PATH, fuel_tiff_path=TIFF_FUEL_PATH)
 
 # --------- postprocessing pipeline ---------
-fire_df_post = fire_df_fe[columns].copy()
-fire_df_post = postprocessing_pipeline(fire_df_post)
+fire_df_post = postprocessing_pipeline(fire_df_fe)
 
 # ---------  training pipeline ---------
 factor1 = factors[0]  # "zone_WE"
 factor2 = factors[1]  # "zone_NS"
-covariates_categorical = DEFAULT_COLUMNS["covariates_categorical"]
+covariates_categorical = DEFAULT_COLUMNS_DICT["covariates_categorical"]
 target = "propagation_speed_mm"
-pi_covariates = ["day_night", 'high_season']
+pi_covariates = DEFAULT_COLUMNS_DICT["pi_covariates"]
 alpha = 0.1
 df, pp_dict, pi_dict = train_pipeline(
        df=fire_df_post,

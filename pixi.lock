@@ -71,6 +71,7 @@ environments:
       - conda: https://prefix.dev/conda-forge/linux-64/fonttools-4.60.0-py311h3778330_0.conda
       - conda: https://prefix.dev/conda-forge/linux-64/freetype-2.14.1-ha770c72_0.conda
       - conda: https://prefix.dev/conda-forge/linux-64/freexl-2.0.0-h9dce30a_2.conda
+      - conda: https://prefix.dev/conda-forge/linux-64/gdal-3.10.3-py313h60f829d_20.conda
       - conda: https://prefix.dev/conda-forge/noarch/geopandas-1.1.1-pyhd8ed1ab_0.conda
       - conda: https://prefix.dev/conda-forge/noarch/geopandas-base-1.1.1-pyha770c72_0.conda
       - conda: https://prefix.dev/conda-forge/linux-64/geos-3.14.0-h480dda7_0.conda

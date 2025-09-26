@@ -270,8 +270,49 @@ def add_base_model_predictions_to_df(
 
 # ------ saving artifacts ------
 
+def dump_artifacts(
+        artifacts_dir,
+        pp_dict,
+        pi_dict,
+        factors,
+        covariates,
+        covariates_categorical,
+        pi_covariates,
+        target,
+        alpha,
+        ratio
+):
+    model_path    = f"{artifacts_dir}/model.pkl"
+    pi_path       = f"{artifacts_dir}/pi.json"
+    meta_path     = f"{artifacts_dir}/meta.json"
 
-def _save_model(model, pi, meta, model_path, pi_path, meta_path):
+    # model
+    joblib.dump(pp_dict, model_path)
+
+    # predictive intervals
+    pi_serialized = serialize(pi_dict)
+    with open(pi_path, "w", encoding="utf-8") as f:
+        json.dump(pi_serialized, f, indent=2)
+
+    # meta
+    meta = {
+        "factors": factors,
+        "covariates": covariates,
+        "covariates_categorical": covariates_categorical,
+        "pi_covariates": pi_covariates,
+        "target": target,
+        "alpha": alpha,
+        "ratio": ratio
+    }
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+    logger.info("Saved model -> %s", model_path)
+    logger.info("Saved PI    -> %s", pi_path)
+    logger.info("Saved meta  -> %s", meta_path)
+
+
+def _old_save_model(model, pi, meta, model_path, pi_path, meta_path):
 
     joblib.dump(model, model_path)
 
@@ -287,7 +328,7 @@ def _save_model(model, pi, meta, model_path, pi_path, meta_path):
     logger.debug("Saved PI    -> %s", pi_path)
     logger.debug("Saved meta  -> %s", meta_path)
 
-def dump_artifacts(
+def _old_dump_artifacts(
         artifacts_dir,
         df,
         pp_dict,
