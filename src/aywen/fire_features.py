@@ -223,10 +223,13 @@ def add_zones_to_df(df,
     
     # create a copy
     out = df.copy()
-    
+
     try:
-        shape_df = gpd.read_file(shapefile_path)
-        shape_df = shape_df.set_crs(crs=crs)
+        shape_df = gpd.read_file(shapefile_path,  engine="fiona")
+        if shape_df.crs is None:
+            shape_df = shape_df.set_crs(crs)   # assign (no reprojection)
+        else:
+            shape_df = shape_df.to_crs(crs)    # reproject
     except Exception:
         logger.exception("Failed to read shapefile.")
         raise
@@ -938,6 +941,7 @@ def add_fuel_from_tiff_to_df(
                         values[write_pos] = val
 
             out[fuel_col] = values
+
 
     return out
 
