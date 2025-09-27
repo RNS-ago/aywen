@@ -10,6 +10,22 @@ from tqdm import tqdm
 from aywen.utils import TimeOfDayFeatures
 import rasterio
 from rasterio.warp import transform as rio_transform
+from pathlib import Path
+import sys
+
+
+try:
+    from pyproj import datadir
+except Exception:
+    # pyproj not installed; nothing to do
+    datadir = None
+
+proj_dir = Path(sys.prefix) / "Library" / "share" / "proj"
+if proj_dir.is_dir() and (proj_dir / "proj.db").exists():
+    os.environ.setdefault("PROJ_DATA", str(proj_dir))
+    os.environ.setdefault("PROJ_LIB",  str(proj_dir))
+    if datadir is not None:
+        datadir.set_data_dir(str(proj_dir))
 
 logger = logging.getLogger("aywen_logger")
 
@@ -225,7 +241,7 @@ def add_zones_to_df(df,
     out = df.copy()
 
     try:
-        shape_df = gpd.read_file(shapefile_path,  engine="fiona")
+        shape_df = gpd.read_file(shapefile_path, engine="fiona")
         if shape_df.crs is None:
             shape_df = shape_df.set_crs(crs)   # assign (no reprojection)
         else:
