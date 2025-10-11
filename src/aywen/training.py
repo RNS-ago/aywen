@@ -273,64 +273,6 @@ def add_base_model_predictions_to_df(
 
 
 
-
-
-
-def _old_save_model(model, pi, meta, model_path, pi_path, meta_path):
-
-    joblib.dump(model, model_path)
-
-    pi_serialized = serialize(pi)
-
-    with open(pi_path, "w", encoding="utf-8") as f:
-        json.dump(pi_serialized, f, indent=2)
-
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
-
-    logger.debug("Saved model -> %s", model_path)
-    logger.debug("Saved PI    -> %s", pi_path)
-    logger.debug("Saved meta  -> %s", meta_path)
-
-def _old_dump_artifacts(
-        artifacts_dir,
-        df,
-        pp_dict,
-        pi_dict,
-        factor1,
-        factor2,
-        covariates,
-        pi_covariates,
-        target,
-        alpha,
-        ratio
-):
-    for g, df_all in df.groupby([factor1, factor2], observed=True, dropna=False):
-
-        if g not in pp_dict:
-            logging.warning(f"Group {g} not in pp_dict, skipping...")
-            continue
-
-        model = pp_dict[g]
-        pi = pi_dict[g]
-
-        model_path    = f"{artifacts_dir}/model_{g[0]}_{g[1]}.pkl"
-        pi_path       = f"{artifacts_dir}/pi_{g[0]}_{g[1]}.json"
-        meta_path     = f"{artifacts_dir}/meta_{g[0]}_{g[1]}.json"
-
-        meta = {
-            "n_train": int(len(df_all)),
-            "covariates": list(df_all.columns),
-            "covariates": covariates,
-            "pi_covariates": pi_covariates,
-            "target": target,
-            "alpha": alpha,
-            "ratio": ratio
-        }
-
-        _save_model(model, pi, meta, model_path, pi_path, meta_path)
-
-
 # ---- to be used by the eavluation_model script ----
 
 def eval_point_prediction(X_new, model, covariates, mgr):
