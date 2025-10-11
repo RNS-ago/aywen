@@ -1,5 +1,3 @@
-from functools import wraps
-import datetime as dt
 import pandas as pd
 import logging
 import os
@@ -9,14 +7,19 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional, Iterable
 import ast
+from mlflow.tracking import MlflowClient
+import joblib
+from urllib.parse import urlparse, unquote
 
 
 
-# --- Configure logging globally ---
-logging.basicConfig(
-    level=logging.INFO,  # Default level (can be changed later)
-    format="%(message)s"  # Only show the message (no timestamps/levels unless you want them)
-)
+# # --- Configure logging globally ---
+# logging.basicConfig(
+#     level=logging.INFO,  # Default level (can be changed later)
+#     format="%(message)s"  # Only show the message (no timestamps/levels unless you want them)
+# )
+
+logger = logging.getLogger("aywen_logger")
 
 
 def concatnate_name_from_paths(paths: list[str]) -> str:
@@ -379,5 +382,207 @@ def restore(data: dict) -> dict:
     return result
 
 
+def replace_items(lst, replacements):
+    """
+    Replace items in a list if they exist in the replacements dictionary.
 
+    Parameters:
+        lst (list): Input list to modify.
+        replacements (dict): Dictionary where key = old value, value = new value.
+
+    Returns:
+        list: New list with replacements applied.
+    """
+    return [replacements.get(item, item) for item in lst]
+
+
+
+# ------ saving artifacts ------
+
+def save_artifacts(
+        artifacts_dir,
+        df,
+        pp_dict,
+        pi_dict,
+        factors,
+        covariates,
+        covariates_categorical,
+        pi_covariates,
+        fuel_mapping,
+        target,
+        alpha,
+        ratio,
+        metrics=None    
+):
+    df_path = f"{artifacts_dir}/data.parquet"
+    schema_path = f"{artifacts_dir}/schema.json"
+    model_path    = f"{artifacts_dir}/model.pkl"
+    pi_path       = f"{artifacts_dir}/pi.json"
+    fuel_mapping_path = f"{artifacts_dir}/fuel_mapping.json"
+    meta_path     = f"{artifacts_dir}/meta.json"
+    metrics_path  = f"{artifacts_dir}/metrics.csv"
+
+    # data
+    df.to_parquet(df_path, index=False)
+
+    # manager schema     
+    mgr = DtypeManager.from_df(df[covariates])
+    mgr.save(schema_path)
+
+    # model
+    joblib.dump(pp_dict, model_path)
+
+    # predictive intervals
+    pi_serialized = serialize(pi_dict)
+    with open(pi_path, "w", encoding="utf-8") as f:
+        json.dump(pi_serialized, f, indent=2)
+
+    # fuel mapping
+    fuel_mapping_serialized = serialize(fuel_mapping)
+    with open(fuel_mapping_path, "w", encoding="utf-8") as f:
+        json.dump(fuel_mapping_serialized, f, indent=2)
+
+    # metadata
+    meta = {
+        "factors": factors,
+        "covariates": covariates,
+        "covariates_categorical": covariates_categorical,
+        "pi_covariates": pi_covariates,
+        "target": target,
+        "alpha": alpha,
+        "ratio": ratio
+    }
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+    # metrics
+    if metrics is not None:
+        metrics.to_csv(metrics_path, index=False)
+
+    # log
+    logger.info("Saved data   -> %s", df_path)
+    logger.info("Saved model -> %s", model_path)
+    logger.info("Saved PI    -> %s", pi_path)
+    logger.info("Saved meta  -> %s", meta_path)
+    logger.info("Saved schema-> %s", schema_path)
+    if metrics is not None:
+        logger.info("Saved metrics-> %s", metrics_path)
+
+
+
+
+def load_artifacts(run_id: str, experiment_name):
+    client = MlflowClient()
+    exp = client.get_experiment_by_name(experiment_name)
+
+    # Experiment folder on disk (decode spaces etc.)
+    exp_path = Path(unquote(urlparse(exp.artifact_location).path.lstrip("/")))
+    run_dir = exp_path / run_id / "artifacts"
+
+    artifacts = {}
+
+    # DataFrame
+    if (run_dir / "data.parquet").exists():
+        artifacts["data"] = pd.read_parquet(run_dir / "data.parquet")
+        logger.info("Loaded data")
+    else:
+        raise FileNotFoundError(f"Data file not found in run {run_dir / 'data.parquet'}")
+
+    # Schema
+    if (run_dir / "schema.json").exists():
+        artifacts["schema"] = DtypeManager.load(run_dir / "schema.json")
+        logger.info("Loaded schema")
+
+    # Model
+    if (run_dir / "model.pkl").exists():
+        artifacts["model"] = joblib.load(run_dir / "model.pkl")
+        logger.info("Loaded model")
+
+    # Predictive intervals
+    if (run_dir / "pi.json").exists():
+        with open(run_dir / "pi.json", "r", encoding="utf-8") as f:
+            artifacts["pi"] = restore(json.load(f))
+        logger.info("Loaded predictive intervals")
+
+    # Metadata
+    if (run_dir / "meta.json").exists():
+        with open(run_dir / "meta.json", "r", encoding="utf-8") as f:
+            artifacts["meta"] = json.load(f)
+        logger.info("Loaded metadata")
+
+    # Fuel mapping
+    if (run_dir / "fuel_mapping.json").exists():
+        with open(run_dir / "fuel_mapping.json", "r", encoding="utf-8") as f:
+            artifacts["fuel_mapping"] = restore(json.load(f))
+        logger.info("Loaded fuel mapping")
+
+    return artifacts
+
+
+
+def load_latest_run(experiment_name, run_name=None):
+    client = MlflowClient()
+    exp = client.get_experiment_by_name(experiment_name)
+    logger.info(
+        "Using experiment: %s | id: %s | at: %s",
+        exp.name,
+        exp.experiment_id,
+        exp.artifact_location,
+    )
+
+    # build filter string
+    filter_string = "attributes.status = 'FINISHED'"
+    if run_name is not None:
+        filter_string += f" and tags.mlflow.runName = '{run_name}'"
+
+    runs = client.search_runs(
+        [exp.experiment_id],
+        filter_string=filter_string,
+        order_by=["attributes.start_time DESC"],
+        max_results=1,
+    )
+
+    if not runs:
+        raise ValueError(
+            f"No finished runs found for experiment '{experiment_name}'"
+            + (f" with run_name='{run_name}'" if run_name else "")
+        )
+
+    run_id = runs[0].info.run_id
+    logger.info("Loading artifacts from latest run %s", run_id)
+    return load_artifacts(run_id, experiment_name)
+
+
+
+# ------- data frame utils -------
+
+def prepare_long_df(df, cols=None, stubnames=None, i='fire_id', j='model', sep='_', suffix=r'\w+'):
+
+    if cols is None:
+        cols = [
+            'fire_id', 
+            'zone_WE', 
+            'zone_NS',
+            'high_season',
+            'diurnal_nocturnal',
+            'zone_alert',
+            'split2', 
+            'propagation_speed_mm',
+            'prediction_xgb0','lo_xgb0', 'hi_xgb0',
+            'prediction_xgb','lo_xgb', 'hi_xgb',
+            'prediction_base', 'lo_base', 'hi_base'
+        ]
+
+        tmp = df[cols].copy()
+        df_long = pd.wide_to_long(
+            tmp, 
+            stubnames=stubnames or ['prediction', 'lo', 'hi'], 
+            i=i, 
+            j=j, 
+            sep=sep, 
+            suffix=suffix
+            ).reset_index()
+
+
+        return df_long
 

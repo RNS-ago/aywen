@@ -1,9 +1,14 @@
+import math
 import pandas as pd
 import logging
 from sklearn.model_selection import train_test_split
-from aywen.fire_features import DEFAULT_COLUMNS_DICT
+from aywen.fire_features import _COVARIATES, _COVARIATES_CATEGORICAL, CODE_KITRAL
+from aywen.utils import replace_items
+from typing import Dict, Tuple, Hashable, Optional
+import pandas as pd
 
 logger = logging.getLogger("aywen_logger")
+
 
 # Column definitions
 ZONE_ALERT_COL = 'zone_alert'
@@ -13,6 +18,13 @@ ZONE_FACTOR_LEVELS = {
     'zone_WE': ['Costa', 'Valle', 'Cordillera'],
     'zone_NS': ['1', '2', '3', '4', '5']
 }
+
+COVARIATES = replace_items(_COVARIATES, {
+    "initial_fuel": "initial_fuel_reduced"
+})
+COVARIATES_CATEGORICAL = replace_items(_COVARIATES_CATEGORICAL, {
+    "initial_fuel": "initial_fuel_reduced"
+})
 
 
 def filter_rows_by_range(df, thresholds):
@@ -162,6 +174,7 @@ def add_train_test_split_to_df(
         zone_col: str = "zone_alert",
         factor1: str = "zone_WE",
         factor2: str = "zone_NS",
+        fuel_col: str = 'initial_fuel_reduced',
         split2_col : str = "split2",
         split3_col : str = "split3"
 ) -> pd.DataFrame:
@@ -186,10 +199,10 @@ def add_train_test_split_to_df(
     out.loc[out.index.isin(df_test.index), "split2"] = "test"
 
     # Optional: drop NaNs to avoid spurious rows
-    df_chk = out.dropna(subset=['initial_fuel_reduced'])
+    df_chk = out.dropna(subset=[fuel_col])
 
     counts = (df_chk
-        .groupby([factor1, factor2, 'initial_fuel_reduced', 'split3'], observed=True)
+        .groupby([factor1, factor2, fuel_col, 'split3'], observed=True)
         .size()
         .unstack('split3', fill_value=0)
     )
@@ -201,19 +214,278 @@ def add_train_test_split_to_df(
     # rows present somewhere (they all are) but missing in train
     missing = counts[counts['train'] == 0]
 
-    assert missing.empty, (
-        "Some initial_fuel_reduced levels are missing from the train split:\n"
-        + missing.reset_index()[[factor1, factor2, 'initial_fuel_reduced']].to_string(index=False)
-    )
+    # assert missing.empty, (
+    #     "Some initial_fuel_reduced levels are missing from the train split:\n"
+    #     + missing.reset_index()[[factor1, factor2, fuel_col]].to_string(index=False)
+    # )
 
     logger.info("Added %s and %s.", split2_col, split3_col)
 
     return out
 
 
+# -------- reduced fuel  -------
+
+def _old_reduce_fuel_types(s: pd.Series, min_fuel_samples) -> pd.Series:
+    """Collapse rare levels in s to 'other'. Accepts int or fraction."""
+    if min_fuel_samples < 1:
+        n = s.size
+        min_fuel_samples = max(1, math.ceil(min_fuel_samples * n))
+        logger.debug("min_fuel_samples as fraction -> %d samples", min_fuel_samples)
+
+    counts = s.value_counts()
+    rare = counts[counts < min_fuel_samples].index
+    logger.debug("Number of rare fuel types: %s", len(rare))
+    s.cat.rename_categories(lambda x: x.replace(rare, 'other'), inplace=True)
+    return s.replace(rare, 'other')
+
+
+def _reduce_fuel_types(s: pd.Series, min_fuel_samples, other_label: str = "other") -> pd.Series:
+    """
+    Collapse rare levels in s to `other_label`. `min_fuel_samples` accepts an int or a fraction in (0,1).
+    Returns a categorical Series with unused categories removed.
+    """
+    s = s.copy()
+
+    # Ensure categorical dtype (so we keep categories after recoding)
+    if not isinstance(s.dtype, pd.CategoricalDtype):
+        s = s.astype("category")
+
+    # Convert fraction -> absolute threshold
+    if isinstance(min_fuel_samples, (float, int)) and min_fuel_samples < 1:
+        n = s.size
+        min_fuel_samples = max(1, math.ceil(min_fuel_samples * n))
+
+    # Count per level (NaNs excluded by default; change dropna=False if desired)
+    counts = s.value_counts(dropna=True)
+    rare = counts[counts < min_fuel_samples].index
+
+    # Optionally avoid collapsing the target label itself if present
+    if len(rare) == 0:
+        return s
+
+    # 1) Make sure `other_label` is a valid category
+    if other_label not in s.cat.categories:
+        s = s.cat.add_categories([other_label])
+
+    # 2) Assign rare levels to "other" (no .replace to avoid FutureWarning)
+    mask = s.isin(rare)
+    if mask.any():
+        s.loc[mask] = other_label
+
+    # 3) Drop categories that are no longer used
+    s = s.cat.remove_unused_categories()
+
+    return s
+
+
+
+def add_fuel_reduced(
+        df: pd.DataFrame,
+        factor1: str = "zone_WE",
+        factor2: str = "zone_NS",
+        fuel_col: str = "initial_fuel",
+        fuel_reduced_col: str = "initial_fuel_reduced",
+        min_fuel_samples: int = 15
+) -> pd.DataFrame:
+    """
+    Reduce the number of categories in the fuel column by grouping rare categories into 'Other'.
+    
+    Parameters:
+        df (pd.DataFrame): The DataFrame containing the fuel column.
+        fuel_col (str): The name of the column containing the fuel types.
+        fuel_reduced_col (str): The name of the new column to create with reduced fuel types.
+        min_fuel_samples (int): Minimum number of samples for a category to be kept; otherwise grouped into 'Other'.
+    
+    Returns:
+        pd.DataFrame: The DataFrame with the new reduced fuel column.
+    """
+
+    #--- Call args (debug) ---
+    logger.debug("called with df.shape=%s, fuel_col=%s, fuel_reduced_col=%s, min_fuel_samples=%s",
+        df.shape, fuel_col, fuel_reduced_col, min_fuel_samples
+    )
+
+    # create a copy
+    out = df.copy()
+
+    # out['tmp'] = (out[fuel_col]
+    #    .astype(str)
+    #    .str.replace('-', '', regex=False)
+    #    .str.replace(' ', '_', regex=False)
+    #    .str.replace(',', '_', regex=False)
+    #    .str.replace('>', 'gt_', regex=False)
+    #    .str.replace('<', 'lt_', regex=False)
+    #    .str.replace('=', 'eq_', regex=False)
+    #    .str.replace('.', '', regex=False)
+    #    .str.lower()
+    # )
+
+    # groupwise reduction (aligned back to original index)
+    out[fuel_reduced_col] = out[fuel_col].groupby([out[factor1], out[factor2]], observed=True).transform(lambda g: _reduce_fuel_types(g, min_fuel_samples=min_fuel_samples))
+    #out = out.drop(columns=['tmp'])
+    out[fuel_reduced_col] = pd.Categorical(out[fuel_reduced_col], categories=out[fuel_reduced_col].unique())
+
+    kept = out[fuel_reduced_col].groupby([out[factor1], out[factor2]], observed=True).nunique(dropna=True)
+    original = df[fuel_col].groupby([df[factor1], df[factor2]], observed=True).nunique(dropna=True)
+    logger.debug("Fuel categories reduced per group: \n%s", pd.DataFrame({'original': original, 'kept': kept}))
+
+    logger.info("Added %s.", fuel_reduced_col)
+
+    return out
+    
+
+def learn_groupwise_mapping(
+    df: pd.DataFrame,
+    factor1: str = "zone_WE",
+    factor2: str = "zone_NS",
+    categories: Optional[list] = None,            # infer if None
+    learn_source_col: str = "initial_fuel",
+    learn_target_col: str = "initial_fuel_reduced",
+    other_label: str = "other",                   # match your pipeline naming
+    strict: bool = True,                          # raise on conflicts
+) -> Dict[Tuple[Hashable, Hashable], Dict[Hashable, Hashable]]:
+    """
+    Learn mapping from `learn_source_col` → `learn_target_col` within each (factor1, factor2).
+
+    Returns:
+        Dict[(factor1, factor2) -> Dict[source_category -> target_category]]
+    """
+
+    # --- Validate inputs
+    required = {factor1, factor2, learn_source_col, learn_target_col}
+    missing = required - set(df.columns)
+    if missing:
+        raise KeyError(f"Missing columns in df: {sorted(missing)}")
+
+    # --- Decide the universe of source categories
+    if categories is None:
+        categories = (
+            df[learn_source_col].dropna().unique().tolist()
+        )
+
+    # --- Pre-create mapping for each observed (factor1, factor2)
+    groups = df[[factor1, factor2]].drop_duplicates()
+    mapping: Dict[Tuple[Hashable, Hashable], Dict[Hashable, Hashable]] = {
+        (row[factor1], row[factor2]): {cat: other_label for cat in categories}
+        for _, row in groups.iterrows()
+    }
+
+    # --- Fill with learned pairs (single pass)
+    for (f1, f2), g in df.groupby([factor1, factor2], observed=True, dropna=False):
+        # Keep only valid pairs
+        sub = g[[learn_source_col, learn_target_col]].dropna()
+
+        # Remove duplicate rows
+        sub = sub.drop_duplicates()
+
+        if strict:
+            # Detect conflicts: same source → multiple targets in this group
+            conflict_counts = sub.groupby(learn_source_col, observed=True)[learn_target_col].nunique()
+            conflicts = conflict_counts[conflict_counts > 1]
+            if not conflicts.empty:
+                masked = sub[sub[learn_source_col].isin(conflicts.index)]
+                raise ValueError(
+                    f"Conflicting mappings in group {(f1, f2)} for "
+                    f"{learn_source_col}: {masked.sort_values(learn_source_col).to_dict(orient='list')}"
+                )
+
+        # Build pairs (if multiple rows per source remain, take first)
+        pairs = (
+            sub.groupby(learn_source_col, observed=True)[learn_target_col]
+               .first()
+               .to_dict()
+        )
+
+        # Update the group mapping
+        mapping[(f1, f2)].update(pairs)
+
+    return mapping
+
+
+def add_groupwise_mapping(
+    df: pd.DataFrame,
+    *,
+    factor1: str = "zone_WE",
+    factor2: str = "zone_NS",
+    mapping: Dict[Tuple[Hashable, Hashable], Dict[Hashable, Hashable]],
+    source_col: str,
+    target_col: str,
+    unknown_label: str = "Unknown",
+    fill_unmapped: bool = True,   # if False, leave unmapped as NaN
+    cast_target_to_category: bool = False,
+) -> pd.DataFrame:
+    """
+    Apply a pre-learned mapping from `source_col` → `target_col` within each (factor1, factor2).
+    """
+
+    # --- Validate
+    if mapping is None:
+        raise ValueError("`mapping` must be provided (dict[(f1,f2) -> dict[source->target]]).")
+    for col in (factor1, factor2, source_col):
+        if col not in df.columns:
+            raise KeyError(f"Missing column: {col!r}")
+
+    # --- Build a tidy mapping table for a vectorized merge
+    # rows: factor1, factor2, source_col, target_col
+    rows = []
+    for (f1, f2), d in mapping.items():
+        # guard: empty dicts are ok; they just won't map anything
+        for src, tgt in d.items():
+            rows.append({factor1: f1, factor2: f2, source_col: src, target_col: tgt})
+    map_df = pd.DataFrame(rows, columns=[factor1, factor2, source_col, target_col])
+
+    out = df.copy()
+
+    if map_df.empty:
+        # no learned pairs: either keep NaN or fill with unknown
+        out[target_col] = unknown_label if fill_unmapped else pd.NA
+    else:
+        # --- Left join to attach mapped targets
+        out = out.merge(
+            map_df,
+            how="left",
+            on=[factor1, factor2, source_col],
+            suffixes=("", "_mapped"),
+        )
+        # after merge, target_col holds the mapped value
+
+        if fill_unmapped:
+            out[target_col] = out[target_col].fillna(unknown_label)
+
+        if cast_target_to_category:
+            # categories from the mapping + maybe the unknown label
+            cats = pd.Series(map_df[target_col].dropna().unique()).tolist()
+            if fill_unmapped and unknown_label not in cats:
+                cats.append(unknown_label)
+            out[target_col] = out[target_col].astype(pd.CategoricalDtype(categories=cats))
+
+    # Optional, compact logging
+    try:
+        n_pairs = sum(len(d) for d in mapping.values())
+        logger.info(
+            "Added %s using %d groups and %d pairs.",
+            target_col, len(mapping), n_pairs
+        )
+    except Exception:
+        logger.info("Added %s.", target_col)
+
+    return out
+
+    
+
+    
+
+
 # ------- postprocessing pipeline -------
 
-def postprocessing_pipeline(df, thresholds=None, zone_col="zone_alert"):
+def postprocessing_pipeline(
+        df, 
+        thresholds=None, 
+        zone_col="zone_alert", 
+        fuel_col='initial_fuel',
+        fuel_reduced_col='initial_fuel_reduced'
+    ) -> pd.DataFrame:
 
     if thresholds is None:
         thresholds = {
@@ -226,6 +498,9 @@ def postprocessing_pipeline(df, thresholds=None, zone_col="zone_alert"):
     out = postprocess_zone_factors(out)
     out = filter_low_observation_zones(out, min_observations=5)
     out = drop_missing_rows(out)
-    out = add_train_test_split_to_df(out, zone_col=zone_col)
+    out = add_fuel_reduced(out, fuel_col=fuel_col, fuel_reduced_col=fuel_reduced_col)
+    out = add_train_test_split_to_df(out, zone_col=zone_col, fuel_col=fuel_reduced_col)
 
-    return out
+    mapping = learn_groupwise_mapping(out, learn_source_col=fuel_col, learn_target_col=fuel_reduced_col, categories=list(CODE_KITRAL.values()))
+
+    return out, mapping

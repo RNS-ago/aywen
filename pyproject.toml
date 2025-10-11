@@ -54,6 +54,7 @@ fiona = ">=1.10.1,<2"
 pyproj = ">=3.7.2,<4"
 proj = ">=9.7.0,<10"
 proj-data = ">=1.23,<2"
+mlflow = ">=3.2.0,<4"
 
 # --- Pixi "build a conda package" configuration ---
 # This is the key new section: it tells Pixi how to turn your Python package into a .conda.

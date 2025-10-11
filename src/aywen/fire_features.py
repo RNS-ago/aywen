@@ -1,5 +1,4 @@
 import logging
-import math
 import pandas as pd
 import numpy as np
 import geopandas as gpd
@@ -29,6 +28,18 @@ if proj_dir.is_dir() and (proj_dir / "proj.db").exists():
 
 logger = logging.getLogger("aywen_logger")
 
+# quiet rasterio
+for name in ("rasterio", "rasterio.env", "rasterio._env"):
+  lg = logging.getLogger(name)
+  lg.setLevel(logging.ERROR)   # or CRITICAL
+  lg.propagate = False
+
+# quiet fiona
+for name in ("fiona", "fiona.env", "fiona._env"):
+    lg = logging.getLogger(name)
+    lg.setLevel(logging.ERROR)
+    lg.propagate = False
+
 # --------------- miscellaneous ---------------
 
 # constants.py
@@ -43,20 +54,20 @@ FACTORS = ["zone_WE", "zone_NS"]
 
 TARGETS = ["propagation_speed_mm", "dt_minutes", "initial_radius_m"]
 
-COVARIATES = [
+_COVARIATES = [
     "temperature",
     "wind_speed_kmh",
     "relative_humidity",
     "slope_degrees",
     "sin_hour",
     "cos_hour",
-    "initial_fuel_reduced",
+    "initial_fuel",
     "diurnal_nocturnal",
     "high_season",
 ]
 
-COVARIATES_CATEGORICAL = [
-    "initial_fuel_reduced",
+_COVARIATES_CATEGORICAL = [
+    "initial_fuel",
     "diurnal_nocturnal",
     "high_season",
 ]
@@ -68,22 +79,22 @@ PI_COVARIATES = [
 
 SPLIT_COLUMNS = ["split2", "split3"]
 
-OTHERS = ["zone_alert", "kitral_fuel_reduced"]
+OTHERS = ["zone_alert", "hour", "kitral_fuel"]
 
 DEFAULT_COLUMNS_DICT = {
     "id": ID_COLUMNS,
     "geospatial": GEOSPATIAL_COLUMNS,
     "timestamp": TIMESTAMP_COLUMNS,
     "factors": FACTORS,
-    "covariates": COVARIATES,
-    "covariates_categorical": COVARIATES_CATEGORICAL,
+    "covariates": _COVARIATES,
+    "covariates_categorical": _COVARIATES_CATEGORICAL,
     "pi_covariates": PI_COVARIATES,
     "targets": TARGETS,
     "split": SPLIT_COLUMNS,
     "others": OTHERS,
 }
 
-DEFAULT_COLUMNS = ID_COLUMNS + GEOSPATIAL_COLUMNS + TIMESTAMP_COLUMNS + FACTORS + COVARIATES + TARGETS + OTHERS
+DEFAULT_COLUMNS = ID_COLUMNS + GEOSPATIAL_COLUMNS + TIMESTAMP_COLUMNS + FACTORS + _COVARIATES + TARGETS + OTHERS
 
 
 CODE_KITRAL = {
@@ -122,6 +133,7 @@ CODE_KITRAL = {
 }
 
 DEFAULT_TO_KITRAL = {
+    "Aserrin o Corteza en Acopio": "Desechos Explotacion a Tala Rasa de Plantaciones", #  made it up
     "Bosque nativo": "Arbolado Nativo Denso",
     "Desecho Agricola": "Matorrales y Arbustos Mesomorficos Medios y Ralos", # feedback from Ignacia
     "Desecho de Poda": "Desechos Explotacion a Tala Rasa de Plantaciones",
@@ -150,6 +162,7 @@ DEFAULT_TO_KITRAL = {
 }
 
 
+
 # --------------- select columns ---------------
 
 def select_columns_from_df(
@@ -170,6 +183,7 @@ def select_columns_from_df(
         missing = [col for col in include if col not in out.columns]
         if missing:
             raise KeyError(f"Columns not found in df: {missing}")
+        include = [col for col in out.columns if col in include]  # preserve order
         out = out[include]
         logger.info("Selected columns: %s", include)
 
@@ -1120,117 +1134,12 @@ def map_default_to_kitral(df: pd.DataFrame, fuel_col: str) -> pd.Series:
         raise KeyError(f"Column {fuel_col} not found in df.")
     
     # Map codes to descriptions using DEFAULT_FUEL_MAP
-    out[fuel_col] = out[fuel_col].map(DEFAULT_TO_KITRAL).fillna("Unknown")
-    all_categories = list(CODE_KITRAL.values()) + ["Unknown"]
-    out[fuel_col] = pd.Categorical(out[fuel_col], categories=all_categories)
-    
-    return out
-
-
-def _old_reduce_fuel_types(s: pd.Series, min_fuel_samples) -> pd.Series:
-    """Collapse rare levels in s to 'other'. Accepts int or fraction."""
-    if min_fuel_samples < 1:
-        n = s.size
-        min_fuel_samples = max(1, math.ceil(min_fuel_samples * n))
-        logger.debug("min_fuel_samples as fraction -> %d samples", min_fuel_samples)
-
-    counts = s.value_counts()
-    rare = counts[counts < min_fuel_samples].index
-    logger.debug("Number of rare fuel types: %s", len(rare))
-    s.cat.rename_categories(lambda x: x.replace(rare, 'other'), inplace=True)
-    return s.replace(rare, 'other')
-
-
-def _reduce_fuel_types(s: pd.Series, min_fuel_samples, other_label: str = "other") -> pd.Series:
-    """
-    Collapse rare levels in s to `other_label`. `min_fuel_samples` accepts an int or a fraction in (0,1).
-    Returns a categorical Series with unused categories removed.
-    """
-    s = s.copy()
-
-    # Ensure categorical dtype (so we keep categories after recoding)
-    if not isinstance(s.dtype, pd.CategoricalDtype):
-        s = s.astype("category")
-
-    # Convert fraction -> absolute threshold
-    if isinstance(min_fuel_samples, (float, int)) and min_fuel_samples < 1:
-        n = s.size
-        min_fuel_samples = max(1, math.ceil(min_fuel_samples * n))
-
-    # Count per level (NaNs excluded by default; change dropna=False if desired)
-    counts = s.value_counts(dropna=True)
-    rare = counts[counts < min_fuel_samples].index
-
-    # Optionally avoid collapsing the target label itself if present
-    if len(rare) == 0:
-        return s
-
-    # 1) Make sure `other_label` is a valid category
-    if other_label not in s.cat.categories:
-        s = s.cat.add_categories([other_label])
-
-    # 2) Assign rare levels to "other" (no .replace to avoid FutureWarning)
-    mask = s.isin(rare)
-    if mask.any():
-        s.loc[mask] = other_label
-
-    # 3) Drop categories that are no longer used
-    s = s.cat.remove_unused_categories()
-
-    return s
-
-
-
-def add_fuel_reduced(
-        df: pd.DataFrame,
-        factor1: str = "zone_WE",
-        factor2: str = "zone_NS",
-        fuel_col: str = "initial_fuel",
-        fuel_reduced_col: str = "initial_fuel_reduced",
-        min_fuel_samples: int = 15
-) -> pd.DataFrame:
-    """
-    Reduce the number of categories in the fuel column by grouping rare categories into 'Other'.
-    
-    Parameters:
-        df (pd.DataFrame): The DataFrame containing the fuel column.
-        fuel_col (str): The name of the column containing the fuel types.
-        fuel_reduced_col (str): The name of the new column to create with reduced fuel types.
-        min_fuel_samples (int): Minimum number of samples for a category to be kept; otherwise grouped into 'Other'.
-    
-    Returns:
-        pd.DataFrame: The DataFrame with the new reduced fuel column.
-    """
-
-    #--- Call args (debug) ---
-    logger.debug("called with df.shape=%s, fuel_col=%s, fuel_reduced_col=%s, min_fuel_samples=%s",
-        df.shape, fuel_col, fuel_reduced_col, min_fuel_samples
-    )
-
-    # create a copy
-    out = df.copy()
-
-    # out['tmp'] = (out[fuel_col]
-    #    .astype(str)
-    #    .str.replace('-', '', regex=False)
-    #    .str.replace(' ', '_', regex=False)
-    #    .str.replace(',', '_', regex=False)
-    #    .str.replace('>', 'gt_', regex=False)
-    #    .str.replace('<', 'lt_', regex=False)
-    #    .str.replace('=', 'eq_', regex=False)
-    #    .str.replace('.', '', regex=False)
-    #    .str.lower()
-    # )
-
-    # groupwise reduction (aligned back to original index)
-    out[fuel_reduced_col] = out[fuel_col].groupby([out[factor1], out[factor2]], observed=True).transform(lambda g: _reduce_fuel_types(g, min_fuel_samples=min_fuel_samples))
-    #out = out.drop(columns=['tmp'])
-    out[fuel_reduced_col] = pd.Categorical(out[fuel_reduced_col], categories=out[fuel_reduced_col].unique())
-
-    kept = out[fuel_reduced_col].nunique(dropna=True)
-    original = df[fuel_col].nunique(dropna=True)
-    logger.info("Fuel categories reduced: %d (from %d).", kept, original)
-    logger.info("Added %s.", fuel_reduced_col)
+    out[fuel_col] = out[fuel_col].map(DEFAULT_TO_KITRAL)
+    assert out[fuel_col].isnull().sum() == 0, "Some fuel codes could not be mapped."
+    counts = out['initial_fuel'].value_counts()
+    categories = counts[counts > 0].index
+    out[fuel_col] = pd.Categorical(out[fuel_col], categories=categories)
+    logger.info("Mapped %s to Kitral codes.", fuel_col)
 
     return out
 
@@ -1697,7 +1606,7 @@ def feature_engineering_pipeline(
         skip_kitral_fuel: bool = False,
         skip_weather: bool = False,
         skip_target: bool = False,
-        include: list[str] = DEFAULT_COLUMNS+['hour'],
+        include: list[str] = DEFAULT_COLUMNS,
         ) -> pd.DataFrame:
 
         out = df.copy()
@@ -1709,10 +1618,10 @@ def feature_engineering_pipeline(
         out = add_high_season_to_df(out, datetime_col = datetime_col,high_season_col = 'high_season')
         if not skip_default_fuel:
             out = map_default_to_kitral(out, fuel_col=fuel_col)
-            out = add_fuel_reduced(df = out, fuel_col = fuel_col, fuel_reduced_col = 'initial_fuel_reduced')
+            #out = add_fuel_reduced(df = out, fuel_col = fuel_col, fuel_reduced_col = 'initial_fuel_reduced')
         if not skip_kitral_fuel:
             out = add_kitral_fuel_to_df(out, fuel_tiff_path=fuel_tiff_path, lon_col=lon_col, lat_col=lat_col, fuel_col=kitral_col)
-            out = add_fuel_reduced(df = out, fuel_col = kitral_col, fuel_reduced_col = 'kitral_fuel_reduced')
+            #out = add_fuel_reduced(df = out, fuel_col = kitral_col, fuel_reduced_col = 'kitral_fuel_reduced')
         if not skip_weather:
             weather = _get_weather_data() # this will be replaced by an streaming API
             out = _merge_weather_data(out, weather)
