@@ -3,7 +3,7 @@ import pandas as pd
 from pandas.testing import assert_frame_equal
 from aywen.utils import DtypeManager
 import xgboost as xgb
-from aywen.models import eval_point_prediction
+from aywen.training import eval_point_prediction
 import numpy as np
 
 

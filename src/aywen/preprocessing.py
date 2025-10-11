@@ -999,6 +999,9 @@ def merge_and_analyze(df, dfd):
 
 
 def preprocessing_pipeline(fire_data_paths: list[str], dispatch_data_paths: list[str], output_dir: str = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+
+    logger.important("Starting preprocessing pipeline")
+
     # Load datasets
     fire_dfs = load_datasets(fire_data_paths)
     dispatch_dfs = load_datasets(dispatch_data_paths)

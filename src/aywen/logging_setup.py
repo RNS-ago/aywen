@@ -1,12 +1,25 @@
 import logging
 import logging.config
 
+# --- NEW: define custom level ---
+IMPORTANT = 25
+logging.addLevelName(IMPORTANT, "IMPORTANT")
+setattr(logging, "IMPORTANT", IMPORTANT)
+
+def important(self, msg, *args, **kwargs):
+    if self.isEnabledFor(IMPORTANT):
+        self._log(IMPORTANT, msg, args, **kwargs)
+
+logging.Logger.important = important
+# --- end NEW ---
+
 COLORS = {
-    "DEBUG": "\033[37m",   # white
-    "INFO": "\033[32m",    # green
-    "WARNING": "\033[33m", # yellow
-    "ERROR": "\033[31m",   # red
-    "CRITICAL": "\033[41m" # red background
+    "DEBUG": "\033[37m",      # white
+    "INFO": "\033[32m",       # green
+    "IMPORTANT": "\033[36m",  # cyan
+    "WARNING": "\033[33m",    # yellow
+    "ERROR": "\033[31m",      # red
+    "CRITICAL": "\033[41m"    # red background
 }
 RESET = "\033[0m"
 
@@ -45,7 +58,9 @@ def configure_logging():
             },
             "verbose": {
                 "()": ColorFormatter,
-                "format": "\033[90m%(asctime)s\033[0m [%(levelname_color)s] \033[36m%(name)s\033[0m: \033[34m%(funcName)s\033[0m  %(message)s (\033[35m%(filename)s:%(lineno)d\033[0m)"
+                "format": "\033[90m%(asctime)s\033[0m [%(levelname_color)s] \033[36m%(name)s\033[0m: "
+                          "\033[34m%(funcName)s\033[0m  %(message)s "
+                          "(\033[35m%(filename)s:%(lineno)d\033[0m)"
             }
         },
         "filters": {
@@ -53,11 +68,11 @@ def configure_logging():
                 "()": MaxLevelFilter,
                 "max_level": logging.DEBUG,
             },
+            # Allow INFO + IMPORTANT
             "max_info": {
                 "()": MaxLevelFilter,
-                "max_level": logging.INFO,
+                "max_level": IMPORTANT,
             },
-            # Toggle filters based on the root logger's current level
             "root_is_info": {
                 "()": EffectiveRootLevelFilter,
                 "required_level": logging.INFO,
@@ -66,9 +81,13 @@ def configure_logging():
                 "()": EffectiveRootLevelFilter,
                 "required_level": logging.DEBUG,
             },
+            # ✅ NEW — activates when root level is IMPORTANT
+            "root_is_important": {
+                "()": EffectiveRootLevelFilter,
+                "required_level": IMPORTANT,
+            },
         },
         "handlers": {
-            # Active only when root level is DEBUG: shows DEBUG (and below) with verbose
             "debug_stdout": {
                 "class": "logging.StreamHandler",
                 "level": "DEBUG",
@@ -76,7 +95,6 @@ def configure_logging():
                 "formatter": "verbose",
                 "stream": "ext://sys.stdout",
             },
-            # INFO → simple, only when root level is INFO (overview mode)
             "info_simple": {
                 "class": "logging.StreamHandler",
                 "level": "INFO",
@@ -84,12 +102,19 @@ def configure_logging():
                 "formatter": "simple",
                 "stream": "ext://sys.stdout",
             },
-            # INFO → verbose, only when root level is DEBUG (debugging mode)
             "info_verbose": {
                 "class": "logging.StreamHandler",
                 "level": "INFO",
                 "filters": ["max_info", "root_is_debug"],
                 "formatter": "verbose",
+                "stream": "ext://sys.stdout",
+            },
+            # ✅ NEW — active only when root level == IMPORTANT
+           "important_simple": {
+                "class": "logging.StreamHandler",
+                "level": "INFO",                        # <- was "IMPORTANT"
+                "filters": ["max_info", "root_is_important"],  # <- add max_info here
+                "formatter": "simple",
                 "stream": "ext://sys.stdout",
             },
             "stderr": {
@@ -101,8 +126,14 @@ def configure_logging():
         },
         "loggers": {
             "": {
-                "handlers": ["debug_stdout", "info_simple", "info_verbose", "stderr"],
-                # Toggle this between logging.INFO and logging.DEBUG at runtime:
+                # ✅ Include the new handler here
+                "handlers": [
+                    "debug_stdout",
+                    "info_simple",
+                    "info_verbose",
+                    "important_simple",
+                    "stderr",
+                ],
                 "level": "DEBUG",
                 "propagate": False,
             },
@@ -110,3 +141,4 @@ def configure_logging():
     }
 
     logging.config.dictConfig(logger_config)
+

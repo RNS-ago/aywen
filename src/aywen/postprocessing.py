@@ -352,6 +352,10 @@ def learn_groupwise_mapping(
         Dict[(factor1, factor2) -> Dict[source_category -> target_category]]
     """
 
+    logger.important("Learning groupwise mapping from %s to %s within (%s, %s)",
+        learn_source_col, learn_target_col, factor1, factor2
+    )
+
     # --- Validate inputs
     required = {factor1, factor2, learn_source_col, learn_target_col}
     missing = required - set(df.columns)
@@ -472,9 +476,6 @@ def add_groupwise_mapping(
 
     return out
 
-    
-
-    
 
 
 # ------- postprocessing pipeline -------
@@ -482,16 +483,25 @@ def add_groupwise_mapping(
 def postprocessing_pipeline(
         df, 
         thresholds=None, 
-        zone_col="zone_alert", 
-        fuel_col='initial_fuel',
-        fuel_reduced_col='initial_fuel_reduced'
+        zone_col="zone_alert",
+        kitral_fuel: bool = False, 
     ) -> pd.DataFrame:
+
+    if kitral_fuel:
+        fuel_col = "kitral_fuel"
+        fuel_reduced_col='kitral_fuel_reduced'
+    else:
+        fuel_col = "initial_fuel"
+        fuel_reduced_col='initial_fuel_reduced'
 
     if thresholds is None:
         thresholds = {
             "dt_minutes": {"lower": 10, "upper": 30},
             "initial_radius_m": {"lower": 2, "upper": 100}
         }
+
+    logger.important("Starting postprocessing pipeline with df.shape=%s", df.shape)
+    logger.important("Using fuel_col=%s (kitral_fuel=%s)", fuel_col, kitral_fuel)
 
     out = df.copy()
     out = filter_rows_by_range(out, thresholds)

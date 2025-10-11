@@ -165,7 +165,7 @@ def train_pipeline(
 ):
     
     #--- Call args (debug) ---
-    logger.info("called with df.shape=%s, factor1=%s, factor2=%s, target=%s, covariates=%s, pi_covariates=%s, alpha=%s",
+    logger.important("train_pipeline called with df.shape=%s, factor1=%s, factor2=%s, target=%s, covariates=%s, pi_covariates=%s, alpha=%s",
         df.shape, factor1, factor2, target, covariates, pi_covariates, alpha) 
     
     out = df.copy()

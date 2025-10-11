@@ -1136,7 +1136,7 @@ def map_default_to_kitral(df: pd.DataFrame, fuel_col: str) -> pd.Series:
     # Map codes to descriptions using DEFAULT_FUEL_MAP
     out[fuel_col] = out[fuel_col].map(DEFAULT_TO_KITRAL)
     assert out[fuel_col].isnull().sum() == 0, "Some fuel codes could not be mapped."
-    counts = out['initial_fuel'].value_counts()
+    counts = out[fuel_col].value_counts()
     categories = counts[counts > 0].index
     out[fuel_col] = pd.Categorical(out[fuel_col], categories=categories)
     logger.info("Mapped %s to Kitral codes.", fuel_col)
@@ -1600,14 +1600,20 @@ def feature_engineering_pipeline(
         topo_csv_path: str = None,
         topo_dem_path: str = None,
         fuel_tiff_path: str = None,
-        fuel_col: str = "initial_fuel",
-        kitral_col: str = "kitral_fuel",
-        skip_default_fuel: bool = False,
-        skip_kitral_fuel: bool = False,
+        kitral_fuel: bool = False,
         skip_weather: bool = False,
         skip_target: bool = False,
         include: list[str] = DEFAULT_COLUMNS,
         ) -> pd.DataFrame:
+
+        if kitral_fuel:
+            fuel_col = "kitral_fuel"
+        else:
+            fuel_col = "initial_fuel"
+
+        logger.important("Starting feature engineering pipeline with df.shape=%s", df.shape)
+        logger.important("Using fuel_col=%s (kitral_fuel=%s)", fuel_col, kitral_fuel)
+        logger.important("Using include columns: %s", include)
 
         out = df.copy()
         out = add_zones_to_df(out, shapefile_path=zone_shapefile_path, crs=crs, lon_col=lon_col, lat_col=lat_col, zone_col=zone_col, new_zone_col="zone_alert", zone_threshold=zone_threshold)
@@ -1616,12 +1622,10 @@ def feature_engineering_pipeline(
         out = add_topo_to_df(out, csv_path=topo_csv_path, dem_path=topo_dem_path, lon_col=lon_col, lat_col=lat_col, id_col=id_col)
         out = add_diurnal_nocturnal_to_df(out, datetime_col=datetime_col, diurnal_nocturnal_col='diurnal_nocturnal')
         out = add_high_season_to_df(out, datetime_col = datetime_col,high_season_col = 'high_season')
-        if not skip_default_fuel:
-            out = map_default_to_kitral(out, fuel_col=fuel_col)
-            #out = add_fuel_reduced(df = out, fuel_col = fuel_col, fuel_reduced_col = 'initial_fuel_reduced')
-        if not skip_kitral_fuel:
+        if kitral_fuel:# add kitral fuel from tiff
             out = add_kitral_fuel_to_df(out, fuel_tiff_path=fuel_tiff_path, lon_col=lon_col, lat_col=lat_col, fuel_col=kitral_col)
-            #out = add_fuel_reduced(df = out, fuel_col = kitral_col, fuel_reduced_col = 'kitral_fuel_reduced')
+        else: # map default fuel to kitral codes
+            out = map_default_to_kitral(out, fuel_col=fuel_col)
         if not skip_weather:
             weather = _get_weather_data() # this will be replaced by an streaming API
             out = _merge_weather_data(out, weather)
@@ -1631,5 +1635,6 @@ def feature_engineering_pipeline(
             out = add_surface_to_df(out, radius_col='initial_radius_m')
             out = add_propagation_speed_to_df(out, radius_col='initial_radius_m', dt_col='dt_minutes', speed_col='propagation_speed_mm', add_kmh=True, speed_kmh_col='propagation_speed_kmh')
         out = select_columns_from_df(out, include=include)
+        
         
         return out

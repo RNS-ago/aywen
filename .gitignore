@@ -24,3 +24,6 @@ DEVELOPMENT.md
 !.pixi/config.toml
 
 *.conda
+
+# mlflow
+mlruns/

@@ -51,7 +51,7 @@ from aywen.preprocessing import preprocessing_pipeline
 from aywen.fire_features import feature_engineering_pipeline
 from aywen.postprocessing import postprocessing_pipeline
 from aywen.fire_features import DEFAULT_COLUMNS_DICT
-from aywen.models import train_pipeline,  add_elliptical_propagation_speed_to_df, add_base_model_predictions_to_df
+from aywen.training import train_pipeline,  add_elliptical_propagation_speed_to_df, add_base_model_predictions_to_df
 from aywen.testing import assert_df_from_file, assert_predictions_match
 
 # --- Define paths ---
