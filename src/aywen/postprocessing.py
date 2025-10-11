@@ -2,7 +2,7 @@ import math
 import pandas as pd
 import logging
 from sklearn.model_selection import train_test_split
-from aywen.fire_features import _COVARIATES, _COVARIATES_CATEGORICAL, CODE_KITRAL
+from aywen.fire_features import  COVARIATES, COVARIATES_CATEGORICAL, CODE_KITRAL
 from aywen.utils import replace_items
 from typing import Dict, Tuple, Hashable, Optional
 import pandas as pd
@@ -19,10 +19,10 @@ ZONE_FACTOR_LEVELS = {
     'zone_NS': ['1', '2', '3', '4', '5']
 }
 
-COVARIATES = replace_items(_COVARIATES, {
+COVARIATES = replace_items(COVARIATES, {
     "initial_fuel": "initial_fuel_reduced"
 })
-COVARIATES_CATEGORICAL = replace_items(_COVARIATES_CATEGORICAL, {
+COVARIATES_CATEGORICAL = replace_items(COVARIATES_CATEGORICAL, {
     "initial_fuel": "initial_fuel_reduced"
 })
 
@@ -484,15 +484,10 @@ def postprocessing_pipeline(
         df, 
         thresholds=None, 
         zone_col="zone_alert",
-        kitral_fuel: bool = False, 
+        fuel_col: str = "initial_fuel",
+        fuel_reduced_col: str = "initial_fuel_reduced"
     ) -> pd.DataFrame:
 
-    if kitral_fuel:
-        fuel_col = "kitral_fuel"
-        fuel_reduced_col='kitral_fuel_reduced'
-    else:
-        fuel_col = "initial_fuel"
-        fuel_reduced_col='initial_fuel_reduced'
 
     if thresholds is None:
         thresholds = {
@@ -501,7 +496,6 @@ def postprocessing_pipeline(
         }
 
     logger.important("Starting postprocessing pipeline with df.shape=%s", df.shape)
-    logger.important("Using fuel_col=%s (kitral_fuel=%s)", fuel_col, kitral_fuel)
 
     out = df.copy()
     out = filter_rows_by_range(out, thresholds)

@@ -50,15 +50,15 @@ ratio = 3.0  # Elliptical ratio between major and minor axis (currently unused i
 def main():
     
     ap = argparse.ArgumentParser(description="Scorer")
-    ap.add_argument("--store_path", default=r"C:\Users\lopez\GitRepos\aywen\scripts\mlruns", type=Path)
+    ap.add_argument("--store-path", default=r"C:\Users\lopez\GitRepos\aywen\scripts\mlruns", type=Path)
     ap.add_argument("--experiment-name", default= "arauco_fire_pipeline", type=str)
     ap.add_argument("--run-name", default=None, type=str)
     ap.add_argument("--kitral-fuel", action='store_true', help="Use kitral fuel values instead of default fuel values")
     args = ap.parse_args()
 
     if args.run_name is None:
-        args.run_name = "kitral" if args.kitral_fuel else "default" + "-run"
-    
+        args.run_name = "kitral-run" if args.kitral_fuel else "default-run"
+
     # --- logging setup ---
     configure_logging()
     root = logging.getLogger()
@@ -99,15 +99,12 @@ def main():
             zone_shapefile_path=ZONE_SHAPEFILE_PATH,
             topo_csv_path=TOPO_CSV_PATH,
             fuel_tiff_path=TIFF_FUEL_PATH,
-            kitral_fuel=args.kitral_fuel,
+            kitral_fuel=args.kitral_fuel
         )
         mlflow.log_metric("df_rows_after_features", len(fire_df))
 
         # --------- postprocessing pipeline ---------
-        fire_df, fuel_mapping = postprocessing_pipeline(
-            fire_df,
-            kitral_fuel=args.kitral_fuel
-        )
+        fire_df, fuel_mapping = postprocessing_pipeline(fire_df)
         mlflow.log_metric("df_rows_after_postprocessing", len(fire_df))
 
         # --------- training pipeline ---------

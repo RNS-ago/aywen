@@ -54,7 +54,7 @@ FACTORS = ["zone_WE", "zone_NS"]
 
 TARGETS = ["propagation_speed_mm", "dt_minutes", "initial_radius_m"]
 
-_COVARIATES = [
+COVARIATES = [
     "temperature",
     "wind_speed_kmh",
     "relative_humidity",
@@ -66,7 +66,7 @@ _COVARIATES = [
     "high_season",
 ]
 
-_COVARIATES_CATEGORICAL = [
+COVARIATES_CATEGORICAL = [
     "initial_fuel",
     "diurnal_nocturnal",
     "high_season",
@@ -86,15 +86,15 @@ DEFAULT_COLUMNS_DICT = {
     "geospatial": GEOSPATIAL_COLUMNS,
     "timestamp": TIMESTAMP_COLUMNS,
     "factors": FACTORS,
-    "covariates": _COVARIATES,
-    "covariates_categorical": _COVARIATES_CATEGORICAL,
+    "covariates": COVARIATES,
+    "covariates_categorical": COVARIATES_CATEGORICAL,
     "pi_covariates": PI_COVARIATES,
     "targets": TARGETS,
     "split": SPLIT_COLUMNS,
     "others": OTHERS,
 }
 
-DEFAULT_COLUMNS = ID_COLUMNS + GEOSPATIAL_COLUMNS + TIMESTAMP_COLUMNS + FACTORS + _COVARIATES + TARGETS + OTHERS
+DEFAULT_COLUMNS = ID_COLUMNS + GEOSPATIAL_COLUMNS + TIMESTAMP_COLUMNS + FACTORS + COVARIATES + TARGETS + OTHERS
 
 
 CODE_KITRAL = {
@@ -1601,15 +1601,11 @@ def feature_engineering_pipeline(
         topo_dem_path: str = None,
         fuel_tiff_path: str = None,
         kitral_fuel: bool = False,
+        fuel_col = "initial_fuel",
         skip_weather: bool = False,
         skip_target: bool = False,
         include: list[str] = DEFAULT_COLUMNS,
         ) -> pd.DataFrame:
-
-        if kitral_fuel:
-            fuel_col = "kitral_fuel"
-        else:
-            fuel_col = "initial_fuel"
 
         logger.important("Starting feature engineering pipeline with df.shape=%s", df.shape)
         logger.important("Using fuel_col=%s (kitral_fuel=%s)", fuel_col, kitral_fuel)
@@ -1623,7 +1619,7 @@ def feature_engineering_pipeline(
         out = add_diurnal_nocturnal_to_df(out, datetime_col=datetime_col, diurnal_nocturnal_col='diurnal_nocturnal')
         out = add_high_season_to_df(out, datetime_col = datetime_col,high_season_col = 'high_season')
         if kitral_fuel:# add kitral fuel from tiff
-            out = add_kitral_fuel_to_df(out, fuel_tiff_path=fuel_tiff_path, lon_col=lon_col, lat_col=lat_col, fuel_col=kitral_col)
+            out = add_kitral_fuel_to_df(out, fuel_tiff_path=fuel_tiff_path, lon_col=lon_col, lat_col=lat_col, fuel_col=fuel_col)
         else: # map default fuel to kitral codes
             out = map_default_to_kitral(out, fuel_col=fuel_col)
         if not skip_weather:
