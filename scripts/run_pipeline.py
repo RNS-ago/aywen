@@ -13,7 +13,8 @@ from aywen.preprocessing import preprocessing_pipeline
 from aywen.fire_features import feature_engineering_pipeline, add_elliptical_propagation_speed_to_df
 from aywen.postprocessing import postprocessing_pipeline, COVARIATES, COVARIATES_CATEGORICAL
 from aywen.fire_features import DEFAULT_COLUMNS_DICT
-from aywen.training import train_pipeline, add_base_model_predictions_to_df, compute_residual_diagnostics
+from aywen.training import train_pipeline, add_base_model_predictions_to_df
+from aywen.evaluating import compute_residual_diagnostics
 from aywen.utils import prepare_long_df, save_artifacts
 
 # ---------------- paths  ----------------
