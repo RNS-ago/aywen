@@ -324,67 +324,10 @@ def eval_prediction_interval(X_new, model, covariates):
     }
 
 
-def elliptical_propagation_speed(circular_speed, lo_circular, hi_circular, ratio=3.0):
-
-    major_axis_speed = np.sqrt(ratio)*circular_speed
-    lo_major = np.sqrt(ratio)*lo_circular
-    hi_major = np.sqrt(ratio)*hi_circular
-    lo_major = np.minimum(major_axis_speed, lo_major) # speed cannot be negative
-
-    minor_axis_speed = circular_speed/np.sqrt(ratio)
-    lo_minor = lo_major/ratio
-    hi_minor = hi_major/ratio
-    lo_minor = np.minimum(minor_axis_speed, lo_minor) # speed cannot be negative
-
-    #return major_axis_speed, lo_major, hi_major, minor_axis_speed, lo_minor, hi_minor
-
-    return {
-        "prediction_major_axis_speed_mm": major_axis_speed,
-        "lo_major_axis_speed_mm": lo_major,
-        "hi_major_axis_speed_mm": hi_major,
-        "prediction_minor_axis_speed_mm": minor_axis_speed,
-        "lo_minor_axis_speed": lo_minor,
-        "hi_minor_axis_speed": hi_minor
-    }
 
 
-def add_elliptical_propagation_speed_to_df(
-    df: pd.DataFrame,
-    circular_col: str = 'prediction_xgb',
-    lo_circular_col: str = "lo_xgb",
-    hi_circular_col: str = "hi_xgb",
-    ratio: float = 3.0
-) -> pd.DataFrame:
-    """
-    Compute elliptical propagation speed and add it to the DataFrame.
 
-    Parameters:
-        df (pd.DataFrame): Input DataFrame containing circular propagation speed.
-        circular_col (str): Column name for circular propagation speed (m/min).
-        lo_circular_col (str): Column name for lower bound of circular speed.
-        hi_circular_col (str): Column name for upper bound of circular speed.
-        ratio (float): Ratio of major to minor axis speeds.
-    Returns:
-        pd.DataFrame: DataFrame with added elliptical propagation speed columns.
-    """
 
-    #--- Call args (debug) ---
-    logger.debug("called with df.shape=%s, circular_col=%s, lo_circular_col=%s, hi_circular_col=%s, ratio=%s",
-        df.shape, circular_col, lo_circular_col, hi_circular_col, ratio
-    )
-
-    # validate
-    for col in [circular_col, lo_circular_col, hi_circular_col]:
-        if col not in df.columns:
-            raise KeyError(f"Column '{col}' not found in df.")
-
-    # create a copy
-    out = df.copy()
-    columns_before = out.columns.tolist()
-    out = out.join(out.apply(lambda row: pd.Series(elliptical_propagation_speed(row[circular_col], row[lo_circular_col], row[hi_circular_col], ratio=ratio)), axis=1))
-    new_cols = [c for c in out.columns if c not in columns_before]
-    logger.info("Added %s", new_cols)
-    return out
 
 
 # --- residual diagnostics functions ---
