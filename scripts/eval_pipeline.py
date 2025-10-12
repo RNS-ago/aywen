@@ -66,8 +66,15 @@ def main():
     ap.add_argument("--output", default=None, type=Path)
     ap.add_argument("--experiment-name", default=EXPERIMENT_NAME, type=str)
     ap.add_argument("--input-run-name", default=RUN_NAME, type=str)
-    ap.add_argument("--output-run-name", default=RUN_NAME, type=str)
+    ap.add_argument("--run-name", default=RUN_NAME, type=str)
     args = ap.parse_args()
+
+    if args.output is None:
+        ext = os.path.splitext(args.input.name)[1]
+        args.output = "output" + ext
+
+    if args.run_name is None:
+        args.run_name = args.input_run_name
 
     # --- logging setup ---
     configure_logging()
@@ -99,7 +106,7 @@ def main():
     # --- Select/create experiment and start run ---
     mlflow.set_experiment(EXPERIMENT_NAME)
 
-    with mlflow.start_run(run_name=args.output_run_name) as run:
+    with mlflow.start_run(run_name=args.run_name) as run:
         run_id = run.info.run_id
         logger.info(f"MLflow run started: experiment='{EXPERIMENT_NAME}', run_id='{run_id}'")
     
@@ -140,7 +147,7 @@ def main():
         ) #  elliptical speed columns names to default names
 
         # ------- save artifacts -------
-        save_artifacts(artifacts_dir="artifacts", df=out)
+        save_artifacts(artifacts_dir="artifacts", df=out, df_name=args.output)
     
     
 if __name__ == "__main__":

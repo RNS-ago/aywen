@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional, List, Mapping, Union
+from typing import Any, Dict, Optional, List, Mapping, Union, Iterable
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -528,6 +528,9 @@ def save_artifacts(
         # you can additionally write that specific schema file:
         try:
             # save main data
+            ext = os.path.splitext(df_name)[1].lower()
+            if ext == ".json":
+                df = df.to_dict(orient="records")
             p = _save_one(df, df_name)
             paths["data"] = str(p.resolve())
             logger.info("Saved data   -> %s", p)
@@ -608,77 +611,6 @@ def save_artifacts(
             logger.warning("MLflow log_artifacts failed: %s", e)
 
     return paths
-
-
-def _save_artifacts(
-        artifacts_dir,
-        df,
-        model_dict,
-        pi_dict,
-        factors,
-        covariates,
-        covariates_categorical,
-        pi_covariates,
-        fuel_mapping,
-        target,
-        alpha,
-        ratio,
-        metrics=None    
-):
-    df_path = f"{artifacts_dir}/data.parquet"
-    schema_path = f"{artifacts_dir}/schema.json"
-    model_path    = f"{artifacts_dir}/model.pkl"
-    pi_path       = f"{artifacts_dir}/pi.json"
-    fuel_mapping_path = f"{artifacts_dir}/fuel_mapping.json"
-    meta_path     = f"{artifacts_dir}/meta.json"
-    metrics_path  = f"{artifacts_dir}/metrics.csv"
-
-    # data
-    df.to_parquet(df_path, index=False)
-
-    # manager schema     
-    mgr = DtypeManager.from_df(df[covariates])
-    mgr.save(schema_path)
-
-    # model
-    joblib.dump(model_dict, model_path)
-
-    # predictive intervals
-    pi_serialized = serialize(pi_dict)
-    with open(pi_path, "w", encoding="utf-8") as f:
-        json.dump(pi_serialized, f, indent=2)
-
-    # fuel mapping
-    fuel_mapping_serialized = serialize(fuel_mapping)
-    with open(fuel_mapping_path, "w", encoding="utf-8") as f:
-        json.dump(fuel_mapping_serialized, f, indent=2)
-
-    # metadata
-    meta = {
-        "factors": factors,
-        "covariates": covariates,
-        "covariates_categorical": covariates_categorical,
-        "pi_covariates": pi_covariates,
-        "target": target,
-        "alpha": alpha,
-        "ratio": ratio
-    }
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
-
-    # metrics
-    if metrics is not None:
-        metrics.to_csv(metrics_path, index=False)
-
-    # log
-    logger.info("Saved data   -> %s", df_path)
-    logger.info("Saved model -> %s", model_path)
-    logger.info("Saved PI    -> %s", pi_path)
-    logger.info("Saved meta  -> %s", meta_path)
-    logger.info("Saved schema-> %s", schema_path)
-    if metrics is not None:
-        logger.info("Saved metrics-> %s", metrics_path)
-
 
 
 
