@@ -1,4 +1,3 @@
-import os
 import json
 import time
 import logging
@@ -109,7 +108,7 @@ def main():
         mlflow.log_metric("df_rows_after_postprocessing", len(fire_df))
 
         # --------- training pipeline ---------
-        fire_df, pp_dict, pi_dict = train_pipeline(
+        fire_df, model_dict, pi_dict = train_pipeline(
             df=fire_df,
             factor1=factor1,
             factor2=factor2,
@@ -134,40 +133,21 @@ def main():
         mlflow.log_metric("MAE_xgb_train", metrics.loc[('xgb', 'train+valid'), 'MAE'])
         mlflow.log_metric("MAE_xgb_test", metrics.loc[('xgb', 'test'), 'MAE'])
 
-        # artifacts directory
-        artifacts_dir = Path("artifacts")
-
-        # clean folder before writing new artifacts
-        if artifacts_dir.exists():
-            shutil.rmtree(artifacts_dir)
-        # save outputs locally
-        artifacts_dir.mkdir(parents=True, exist_ok=True)
-        # Save artifacts
+        # ------- save artifacts -------
         save_artifacts(
-            artifacts_dir,
-            fire_df,
-            pp_dict,
-            pi_dict,
-            factors,
-            covariates,
-            covariates_categorical,
-            pi_covariates,
-            fuel_mapping,
-            target,
-            alpha,
-            ratio
+            artifacts_dir="artifacts",
+            df=fire_df,
+            model_dict=model_dict,
+            pi_dict=pi_dict,
+            factors=factors,
+            covariates=covariates,
+            covariates_categorical=covariates_categorical,
+            pi_covariates=pi_covariates,
+            fuel_mapping=fuel_mapping,
+            target=target,
+            alpha=alpha,
+            ratio=ratio
         )
-
-        # Log entire directory so you also capture both PKLs and the DF
-        mlflow.log_artifacts(str(artifacts_dir))
-
-        # Quick preview CSV for convenience, limited to 50 rows
-        preview_path = artifacts_dir / "final_df_preview.csv"
-        try:
-            fire_df.head(50).to_csv(preview_path, index=False)
-            mlflow.log_artifact(str(preview_path))
-        except Exception:
-            pass
 
         # Timing
         total_seconds = time.time() - start_ts

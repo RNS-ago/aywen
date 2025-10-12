@@ -3,9 +3,9 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 import logging
-from typing import List, Dict, Any, Optional, Tuple, Callable
-from aywen.utils import DtypeManager, restore
-from aywen.fire_features import elliptical_propagation_speed, add_elliptical_propagation_speed_to_df
+from typing import List, Dict, Any, Optional, Tuple
+from aywen.utils import DtypeManager
+from aywen.fire_features import add_elliptical_propagation_speed_to_df
 import xgboost as xgb
 import logging
 from collections.abc import Mapping
@@ -270,6 +270,8 @@ def evaluation_pipeline(
         lo_col: str = "pi_lo",
         hi_col: str = "pi_hi"
         ) -> Dict[str, Any]:
+    
+    logger.important("Starting evaluation pipeline")
     
     # Model evaluation
     out = add_prediction_to_df(

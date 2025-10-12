@@ -3,17 +3,15 @@ import logging
 import argparse
 import json
 from pathlib import Path
-from typing import Union
 
 import numpy as np
 import pandas as pd
 import mlflow
-import shutil
 
 from aywen.logging_setup import configure_logging
 from aywen.fire_features import feature_engineering_pipeline, DEFAULT_COLUMNS_DICT
 from aywen.postprocessing import add_groupwise_mapping
-from aywen.utils import load_latest_run, DtypeManager
+from aywen.utils import load_latest_run, save_artifacts
 from aywen.evaluating import evaluation_pipeline
 
 
@@ -54,69 +52,6 @@ def _load_input_file(path: str) -> pd.DataFrame:
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-class NpEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, (np.integer,)):
-            return int(obj)
-        if isinstance(obj, (np.floating,)):
-            return float(obj)
-        if isinstance(obj, (np.ndarray,)):
-            return obj.tolist()
-        return super().default(obj)
-
-
-def _save_output(data: pd.DataFrame, artifacts_dir: Path, name: str = None) -> None:
-    """
-    Save data to file.
-    - dict -> JSON object
-    - list of dicts -> JSON array
-    - DataFrame -> CSV
-    """
-
-    if name is None:
-        if isinstance(data, (dict,list)):
-            name = "output.json"
-            data = data.to_dict(orient="records")
-        elif isinstance(data, pd.DataFrame):
-            name = "output.parquet"
-        else:
-            raise TypeError(
-                "Data must be dict, list of dicts, or pandas DataFrame, "
-                f"not {type(data).__name__}"
-            )
-        
-
-    path = artifacts_dir / name
-    if isinstance(data, dict):
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, cls=NpEncoder)
-    elif isinstance(data, list):
-        if all(isinstance(item, dict) for item in data):
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2,cls=NpEncoder)
-        else:
-            raise ValueError("List must contain only dicts to be saved as JSON")
-    elif isinstance(data, pd.DataFrame):
-        data.to_parquet(path, index=False)
-        mgr = DtypeManager.from_df(data)
-        mgr.save(artifacts_dir / "schema.json")
-        # Quick preview CSV for convenience, limited to 50 rows
-        preview_path = artifacts_dir / name.replace(".parquet", "_preview.csv")
-        try:
-            data.head(50).to_csv(preview_path, index=False)
-            mlflow.log_artifact(str(preview_path))
-        except Exception:
-            pass
-
-    else:
-        raise TypeError(
-            "Data must be dict, list of dicts, or pandas DataFrame, "
-            f"not {type(data).__name__}"
-        )
-    
-    mlflow.log_artifacts(str(artifacts_dir))
-    
-    
 # -------- Config resolved from env, with sensible defaults --------
 EXPERIMENT_NAME_INPUT = "arauco_fire_pipeline"
 EXPERIMENT_NAME = "arauco_fire_evaluation"
@@ -136,9 +71,12 @@ def main():
 
     # --- logging setup ---
     configure_logging()
+    root = logging.getLogger()
+    root.setLevel(logging.IMPORTANT)   # switches “mode” to IMPORTANT
     logger = logging.getLogger("aywen_logger")
-    logger.setLevel(logging.INFO)
-    logger.info('Inicio evaluacion de modelo')
+    logger.handlers.clear()            # child has no handlers
+    logger.propagate = True            # let root handle
+    logger.important("Starting full pipeline")
     # quiet rasterio
     for name in ("rasterio", "rasterio.env", "rasterio._env"):
         lg = logging.getLogger(name)
@@ -201,17 +139,8 @@ def main():
             hi_col = "hi_circular_speed_mm"
         ) #  elliptical speed columns names to default names
 
-
-        # artifacts directory
-        artifacts_dir = Path("artifacts")
-        # clean folder before writing new artifacts
-        if artifacts_dir.exists():
-            shutil.rmtree(artifacts_dir)
-        # save outputs locally
-        artifacts_dir.mkdir(parents=True, exist_ok=True)
-        # Save artifacts
-        _save_output(out, artifacts_dir, args.output)
-        logger.info(f"Saved artifacts to {artifacts_dir}")
+        # ------- save artifacts -------
+        save_artifacts(artifacts_dir="artifacts", df=out)
     
     
 if __name__ == "__main__":

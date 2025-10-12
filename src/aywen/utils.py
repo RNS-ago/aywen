@@ -1,15 +1,21 @@
+from __future__ import annotations
+from typing import Any, Dict, Optional, List, Mapping, Union
+from pathlib import Path
 import pandas as pd
+import numpy as np
+import joblib
+import json
+import shutil
+import mlflow
 import logging
 import os
-import numpy as np
-from sklearn.base import BaseEstimator, TransformerMixin
-import json
 from pathlib import Path
-from typing import Dict, Any, Optional, Iterable
 import ast
 from mlflow.tracking import MlflowClient
-import joblib
 from urllib.parse import urlparse, unquote
+
+from sklearn.base import BaseEstimator, TransformerMixin
+import json
 
 
 
@@ -399,10 +405,215 @@ def replace_items(lst, replacements):
 
 # ------ saving artifacts ------
 
+
+logger = logging.getLogger(__name__)
+
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, (np.ndarray,)):
+            return obj.tolist()
+        return super().default(obj)
+
 def save_artifacts(
+    artifacts_dir: Union[str, Path],
+    df: Optional[pd.DataFrame] = None,
+    model_dict: Optional[Dict[str, Any]] = None,
+    pi_dict: Optional[Dict[str, Any]] = None,
+    factors: Optional[List[str]] = None,
+    covariates: Optional[List[str]] = None,
+    covariates_categorical: Optional[List[str]] = None,
+    pi_covariates: Optional[List[str]] = None,
+    fuel_mapping: Optional[Mapping[Any, Any]] = None,
+    target: Optional[str] = None,
+    alpha: Optional[float] = None,
+    ratio: Optional[float] = None,
+    metrics: Optional[pd.DataFrame] = None,
+    # extra, arbitrary outputs to save; keys are filenames (optional),
+    # values are dict | list[dict] | DataFrame
+    outputs: Optional[Dict[Optional[str], Any]] = None,
+    # filenames (override defaults if you want)
+    df_name: str = "data.parquet",
+    model_name: str = "model.pkl",
+    pi_name: str = "pi.json",
+    fuel_mapping_name: str = "fuel_mapping.json",
+    meta_name: str = "meta.json",
+    schema_name: str = "schema.json",
+    metrics_name: str = "metrics.csv",
+    log_to_mlflow: bool = True,
+) -> Dict[str, str]:
+    """
+    Save run artifacts to `artifacts_dir` and (optionally) log them to MLflow.
+
+    - df -> parquet + schema.json + 50-row CSV preview
+    - model_dict -> joblib pickle
+    - pi_dict, fuel_mapping -> JSON using `serialize`
+    - meta -> JSON constructed from provided metadata
+    - metrics -> CSV
+    - outputs -> extra arbitrary artifacts; if key (filename) is None, a default is inferred
+
+    Returns a dict of artifact logical names -> absolute paths.
+    """
+    
+
+    paths: Dict[str, str] = {}
+
+    adir = Path(artifacts_dir)
+    if adir.exists():
+        shutil.rmtree(adir)  # clean folder before writing new artifacts
+    adir.mkdir(parents=True, exist_ok=True)
+
+    # ---------------- helpers ----------------
+    def _save_one(data: Any, name: Optional[str] = None) -> Path:
+        """
+        Save `data` by type:
+          - dict -> JSON
+          - list[dict] -> JSON array
+          - DataFrame -> Parquet (+ schema.json & head CSV preview)
+        If `name` is None, infer a default.
+        """
+        # infer default filename if not provided
+        if name is None:
+            if isinstance(data, dict):
+                name = "output.json"
+            elif isinstance(data, list) and all(isinstance(x, dict) for x in data):
+                name = "output.json"
+            elif isinstance(data, pd.DataFrame):
+                name = "output.parquet"
+            else:
+                raise TypeError(
+                    "Unsupported data without explicit filename. "
+                    "Must be dict, list[dict], or pandas DataFrame."
+                )
+
+        path = adir / name
+
+        if isinstance(data, dict):
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, cls=NpEncoder)
+        elif isinstance(data, list):
+            if not all(isinstance(item, dict) for item in data):
+                raise ValueError("List must contain only dicts to be saved as JSON.")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, cls=NpEncoder)
+        elif isinstance(data, pd.DataFrame):
+            data.to_parquet(path, index=False)
+            # schema for the dataframe we just saved
+            try:
+                mgr = DtypeManager.from_df(data)
+                mgr.save(adir / "schema.json")
+            except Exception as e:
+                logger.warning("Could not save schema.json: %s", e)
+
+            # quick preview
+            preview_path = adir / name.replace(".parquet", "_preview.csv")
+            try:
+                data.head(50).to_csv(preview_path, index=False)
+            except Exception:
+                pass
+        else:
+            raise TypeError(
+                f"Unsupported type {type(data).__name__}; expected dict, list[dict], or DataFrame."
+            )
+
+        return path
+
+    # ---------------- main artifacts ----------------
+    # data (parquet + schema + preview)
+    if df is not None:
+        # If you want schema of only covariates (as your earlier function did),
+        # you can additionally write that specific schema file:
+        try:
+            # save main data
+            p = _save_one(df, df_name)
+            paths["data"] = str(p.resolve())
+            logger.info("Saved data   -> %s", p)
+            # optional: schema of covariates
+            if covariates:
+                mgr_cov = DtypeManager.from_df(df[covariates])
+                mgr_cov.save(adir / schema_name)
+                paths["schema"] = str((adir / schema_name).resolve())
+                logger.info("Saved schema -> %s", adir / schema_name)
+        except Exception as e:
+            logger.exception("Failed saving data: %s", e)
+
+    # model
+    if model_dict is not None:
+        model_path = adir / model_name
+        joblib.dump(model_dict, model_path)
+        paths["model"] = str(model_path.resolve())
+        logger.info("Saved model  -> %s", model_path)
+
+    # predictive intervals (use your serialize)
+    if pi_dict is not None:
+        try:
+            pi_serialized = serialize(pi_dict)
+        except Exception:
+            # assume already serialized
+            pi_serialized = pi_dict
+        p = _save_one(pi_serialized, pi_name)
+        paths["pi"] = str(p.resolve())
+        logger.info("Saved PI     -> %s", p)
+
+    # fuel mapping (use your serialize)
+    if fuel_mapping is not None:
+        try:
+            fuel_serialized = serialize(fuel_mapping)
+        except Exception:
+            fuel_serialized = fuel_mapping
+        p = _save_one(fuel_serialized, fuel_mapping_name)
+        paths["fuel_mapping"] = str(p.resolve())
+        logger.info("Saved fuel   -> %s", p)
+
+    # metadata
+    meta = {
+        "factors": factors,
+        "covariates": covariates,
+        "covariates_categorical": covariates_categorical,
+        "pi_covariates": pi_covariates,
+        "target": target,
+        "alpha": alpha,
+        "ratio": ratio,
+    }
+    # drop Nones to keep it clean
+    meta = {k: v for k, v in meta.items() if v is not None}
+    if meta:
+        p = _save_one(meta, meta_name)
+        paths["meta"] = str(p.resolve())
+        logger.info("Saved meta   -> %s", p)
+
+    # metrics
+    if metrics is not None:
+        mpath = adir / metrics_name
+        metrics.to_csv(mpath, index=False)
+        paths["metrics"] = str(mpath.resolve())
+        logger.info("Saved metrics-> %s", mpath)
+
+    # ---------------- extra outputs ----------------
+    if outputs:
+        for name, data in outputs.items():
+            p = _save_one(data, name)  # name may be None -> inferred
+            logical = f"output:{name or Path(p).name}"
+            paths[logical] = str(p.resolve())
+            logger.info("Saved extra  -> %s", p)
+
+    # ---------------- MLflow log ----------------
+    if log_to_mlflow:
+        try:
+            mlflow.log_artifacts(str(adir))
+        except Exception as e:
+            logger.warning("MLflow log_artifacts failed: %s", e)
+
+    return paths
+
+
+def _save_artifacts(
         artifacts_dir,
         df,
-        pp_dict,
+        model_dict,
         pi_dict,
         factors,
         covariates,
@@ -430,7 +641,7 @@ def save_artifacts(
     mgr.save(schema_path)
 
     # model
-    joblib.dump(pp_dict, model_path)
+    joblib.dump(model_dict, model_path)
 
     # predictive intervals
     pi_serialized = serialize(pi_dict)

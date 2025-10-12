@@ -168,7 +168,7 @@ def train_pipeline(
     
     # create a copy
     out = df.copy()
-    point_prediction_dict = {}
+    model_dict = {}
     prediction_interval_dict = {}
 
     for g, df_all in out.groupby([factor1, factor2], observed=True, dropna=False):
@@ -205,7 +205,7 @@ def train_pipeline(
         # Model point predictions
         preds = model.predict(dall)
         out.loc[df_all.index, "prediction_xgb"] = preds
-        point_prediction_dict[g] = model # final model is stored
+        model_dict[g] = model # final model is stored
 
         # get prediction intervals
         pi0 = get_predictive_intervals(model0, df_valid, covariates, pi_covariates, target, alpha=alpha,  heteroscedastic=False)
@@ -231,7 +231,7 @@ def train_pipeline(
             out.loc[idx, 'lo_xgb'] = key_series.map(pi['lo'])
             out .loc[idx, 'hi_xgb'] = key_series.map(pi['hi'])
 
-    return out, point_prediction_dict, prediction_interval_dict
+    return out, model_dict, prediction_interval_dict
 
 
 def add_base_model_predictions_to_df(
