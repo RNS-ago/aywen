@@ -1380,7 +1380,17 @@ def add_propagation_speed_to_df(
 
 
 
-def elliptical_propagation_speed(circular_speed, lo_circular, hi_circular, ratio=3.0):
+def elliptical_propagation_speed(
+        circular_speed, 
+        lo_circular, 
+        hi_circular, 
+        ratio,
+        prediction_major_axis_speed_mm_col,
+        lo_major_axis_speed_mm_col,
+        hi_major_axis_speed_mm_col,
+        prediction_minor_axis_speed_mm_col,
+        lo_minor_axis_speed_mm_col,
+        hi_minor_axis_speed_mm_col):
 
     major_axis_speed = np.sqrt(ratio)*circular_speed
     lo_major = np.sqrt(ratio)*lo_circular
@@ -1395,12 +1405,12 @@ def elliptical_propagation_speed(circular_speed, lo_circular, hi_circular, ratio
     #return major_axis_speed, lo_major, hi_major, minor_axis_speed, lo_minor, hi_minor
 
     return {
-        "prediction_major_axis_speed_mm": major_axis_speed,
-        "lo_major_axis_speed_mm": lo_major,
-        "hi_major_axis_speed_mm": hi_major,
-        "prediction_minor_axis_speed_mm": minor_axis_speed,
-        "lo_minor_axis_speed": lo_minor,
-        "hi_minor_axis_speed": hi_minor
+        prediction_major_axis_speed_mm_col: major_axis_speed,
+        lo_major_axis_speed_mm_col: lo_major,
+        hi_major_axis_speed_mm_col: hi_major,
+        prediction_minor_axis_speed_mm_col: minor_axis_speed,
+        lo_minor_axis_speed_mm_col: lo_minor,
+        hi_minor_axis_speed_mm_col: hi_minor
     }
 
 def add_elliptical_propagation_speed_to_df(
@@ -1408,7 +1418,13 @@ def add_elliptical_propagation_speed_to_df(
     circular_col: str = 'prediction_xgb',
     lo_circular_col: str = "lo_xgb",
     hi_circular_col: str = "hi_xgb",
-    ratio: float = 3.0
+    ratio: float = 3.0,
+    prediction_major_axis_speed_mm_col: str = "prediction_major_axis_speed_mm",
+    lo_major_axis_speed_mm_col: str = "lo_major_axis_speed_mm",
+    hi_major_axis_speed_mm_col: str = "hi_major_axis_speed_mm",
+    prediction_minor_axis_speed_mm_col: str = "prediction_minor_axis_speed_mm",
+    lo_minor_axis_speed_mm_col: str = "lo_minor_axis_speed_mm",
+    hi_minor_axis_speed_mm_col: str = "hi_minor_axis_speed_mm"
 ) -> pd.DataFrame:
     """
     Compute elliptical propagation speed and add it to the DataFrame.
@@ -1436,7 +1452,18 @@ def add_elliptical_propagation_speed_to_df(
     # create a copy
     out = df.copy()
     columns_before = out.columns.tolist()
-    out = out.join(out.apply(lambda row: pd.Series(elliptical_propagation_speed(row[circular_col], row[lo_circular_col], row[hi_circular_col], ratio=ratio)), axis=1))
+    out = out.join(out.apply(lambda row: pd.Series(elliptical_propagation_speed(
+        row[circular_col], 
+        row[lo_circular_col], 
+        row[hi_circular_col], 
+        ratio=ratio,
+        prediction_major_axis_speed_mm_col=prediction_major_axis_speed_mm_col,
+        lo_major_axis_speed_mm_col=lo_major_axis_speed_mm_col,
+        hi_major_axis_speed_mm_col=hi_major_axis_speed_mm_col,
+        prediction_minor_axis_speed_mm_col=prediction_minor_axis_speed_mm_col,
+        lo_minor_axis_speed_mm_col=lo_minor_axis_speed_mm_col,
+        hi_minor_axis_speed_mm_col=hi_minor_axis_speed_mm_col
+    )), axis=1))
     new_cols = [c for c in out.columns if c not in columns_before]
     logger.info("Added %s", new_cols)
     return out

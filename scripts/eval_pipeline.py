@@ -11,10 +11,10 @@ import mlflow
 import shutil
 
 from aywen.logging_setup import configure_logging
-from aywen.fire_features import feature_engineering_pipeline, elliptical_propagation_speed
+from aywen.fire_features import feature_engineering_pipeline, elliptical_propagation_speed, DEFAULT_COLUMNS_DICT
 from aywen.postprocessing import add_groupwise_mapping
 from aywen.utils import load_latest_run, DtypeManager
-from aywen.evaluating import eval_point_prediction, eval_prediction_interval
+from aywen.evaluating import evaluation_pipeline, eval_point_prediction, eval_prediction_interval
 
 
 # ---------------- paths  ----------------
@@ -26,12 +26,11 @@ ZONE_SHAPEFILE_PATH = DATA_ORIGINAL + "/tiles_arauco/Zonas_alerta/Zonas_alerta_.
 TOPO_CSV_PATH = DATA_PROCESSED + "/topographic_data.csv"
 FUEL_TIFF_PATH = DATA_ORIGINAL + "/tiles_arauco/ModeloCombustible202409/ModeloCombustible202409.tif"
 
-# --------- default vs kitral fuel values ---------
-is_kitral = True
-if is_kitral:
-    fuel_reduced_col = "kitral_fuel_reduced"
-else:
-    fuel_reduced_col = "initial_fuel_reduced"
+
+# ------ retrieve default columns and values ------
+factors = DEFAULT_COLUMNS_DICT["factors"]  # ["zone_WE", "zone_NS"]
+factor1 = factors[0]  # "zone_WE"
+factor2 = factors[1]  # "zone_NS"
 
 def _load_input_file(path: str) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
@@ -161,7 +160,7 @@ def _add_output_to_df(
             model = pp[g]
             pi_group = pi[g]
             idx = grouped.index
-            results = _evaluation_pipeline(model=model, pi=pi_group, df=grouped, mgr=mgr, pi_covariates=pi_covariates, ratio=ratio)
+            results = evaluation_pipeline(model=model, pi=pi_group, df=grouped, mgr=mgr, pi_covariates=pi_covariates, ratio=ratio)
             out_dict[f'({g[0]}, {g[1]})'] = results
             
             # Add circular predictions
@@ -278,16 +277,31 @@ def main():
     
         # ------- feature engineering --------
         out = _feature_engineering_pipeline(df, fuel_mapping=fuel_mapping)
-        
+
+        # ------ evaluation pipeline ------
+        out = evaluation_pipeline(
+            models=pp,
+            pi=pi,
+            df=out,
+            factor1=factor1,
+            factor2=factor2,
+            mgr=mgr,
+            pi_covariates=meta["pi_covariates"],
+            ratio=meta["ratio"],
+            prediction_col = "prediction_circular_speed_mm",
+            lo_col = "lo_circular_speed_mm",
+            hi_col = "hi_circular_speed_mm"
+        ) #  elliptical speed columns names to default names
+
         # ------ compute output ------
-        out_df, out_dict = _add_output_to_df(out, pp=pp, pi=pi, mgr=mgr, meta=meta)
+        #out_df, out_dict = _add_output_to_df(out, pp=pp, pi=pi, mgr=mgr, meta=meta)
 
         # ------ save output ------
         ext = os.path.splitext(args.output)[1].lower()
         if ext == ".parquet":
-            output = out_df
-        elif ext == ".json":
-            output = out_dict
+            output = out
+        elif ext == ".json": # list of dicts
+            output = out.to_dict(orient="records")
         else:
             raise ValueError(f"Unsupported output file extension: {ext}")
 
