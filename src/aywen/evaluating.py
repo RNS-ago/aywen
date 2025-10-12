@@ -15,44 +15,6 @@ from collections.abc import Mapping
 logger = logging.getLogger("aywen_logger")
 
 
-def eval_point_prediction(X_new, model, covariates, mgr):
-    # 1) Build ordered, typed rows
-    X_new = X_new[covariates].copy()
-    X_ordered = mgr.apply(X_new, strict=True, include=covariates).copy()
-
-    # 2) Predict with TreeSHAP (contributions are on the raw margin scale)
-    dnew = xgb.DMatrix(X_ordered, enable_categorical=True, feature_names=covariates)
-
-    contribs = model.predict(dnew, pred_contribs=True)            # (n_rows, n_features+1)
-    contribs = np.asarray(contribs)
-
-    # Split contributions into SHAP values and the bias term (base value)
-    base_values = contribs[:, -1]                                 # (n_rows,)
-    shap_vals = contribs[:, :-1]                                  # (n_rows, n_features)
-
-    # 3) Margin prediction per row: base + sum of SHAP values across features
-    pred_margin = base_values + shap_vals.sum(axis=1)             # (n_rows,)
-
-    # 4) Return aligned structures (index matches X_ordered)
-    shap_df = pd.DataFrame(shap_vals, columns=covariates, index=X_ordered.index)
-
-    # Convenience: if a single row, return scalars and a dict to keep old behavior
-    if len(X_ordered) == 1:
-        return {
-            "prediction": float(pred_margin[0]),
-            "base_value": float(base_values[0]),
-            "shap_values": shap_df.iloc[0].to_dict(),
-        }
-
-    # Multiple rows: return Series/DataFrame per-row
-    return {
-        "prediction": pd.Series(pred_margin, index=X_ordered.index, name="prediction"),
-        "base_value": pd.Series(base_values, index=X_ordered.index, name="base_value"),
-        "shap_values": shap_df,
-    }
-
-
-
 def _best_iter_kwargs(model: Any) -> dict:
     kw = {}
     best_it = getattr(model, "best_iteration", None)
@@ -112,6 +74,42 @@ def _add_prediction_to_df(
     logger.info("Added %s", [prediction_col] + (["base_value"] if include_shap else []) + (list(shap_cols.columns) if include_shap else []))
 
     return out
+
+def _add_prediction_interval_to_df(
+    df: pd.DataFrame,
+    prediction_interval_dict: Dict[str, Any],   # {'lo': scalar|Mapping, 'hi': scalar|Mapping}
+    covariates: Optional[List[str]] = None,
+    lo_col: str = "pi_lo",
+    hi_col: str = "pi_hi",
+) -> pd.DataFrame:
+    """Single-group helper: add pi_lo / pi_hi to df based on scalars or a mapping keyed by covariate tuples."""
+    if not (isinstance(prediction_interval_dict, dict)
+            and "lo" in prediction_interval_dict and "hi" in prediction_interval_dict):
+        raise ValueError("prediction_interval_dict must be a dict with keys 'lo' and 'hi'.")
+
+    lo_val = prediction_interval_dict["lo"]
+    hi_val = prediction_interval_dict["hi"]
+
+    if covariates:
+        missing = [c for c in covariates if c not in df.columns]
+        if missing:
+            raise ValueError(f"Missing covariate columns in df: {missing}")
+
+        # tuple key per row
+        keys = pd.Series(
+            (t for t in df[covariates].itertuples(index=False, name=None)),
+            index=df.index
+        )
+        lo_series = keys.map(lo_val) if isinstance(lo_val, Mapping) else lo_val
+        hi_series = keys.map(hi_val) if isinstance(hi_val, Mapping) else hi_val
+    else:
+        lo_series, hi_series = lo_val, hi_val  # broadcast scalars
+
+    out = df.copy()
+    out[lo_col] = lo_series
+    out[hi_col] = hi_series
+    return out
+
 
 
 def add_prediction_to_df(
@@ -179,52 +177,7 @@ def add_prediction_to_df(
 
 
 
-def eval_prediction_interval(prediction_interval_dict, covariates):
 
-    assert isinstance(prediction_interval_dict, dict) and "lo" in prediction_interval_dict and "hi" in prediction_interval_dict, \
-        "PI model must be a dictionary with keys 'lo' and 'hi'"
-
-    return {
-        "lo": prediction_interval_dict["lo"],
-        "hi": prediction_interval_dict["hi"]
-    }
-
-
-
-def _add_prediction_interval_to_df(
-    df: pd.DataFrame,
-    prediction_interval_dict: Dict[str, Any],   # {'lo': scalar|Mapping, 'hi': scalar|Mapping}
-    covariates: Optional[List[str]] = None,
-    lo_col: str = "pi_lo",
-    hi_col: str = "pi_hi",
-) -> pd.DataFrame:
-    """Single-group helper: add pi_lo / pi_hi to df based on scalars or a mapping keyed by covariate tuples."""
-    if not (isinstance(prediction_interval_dict, dict)
-            and "lo" in prediction_interval_dict and "hi" in prediction_interval_dict):
-        raise ValueError("prediction_interval_dict must be a dict with keys 'lo' and 'hi'.")
-
-    lo_val = prediction_interval_dict["lo"]
-    hi_val = prediction_interval_dict["hi"]
-
-    if covariates:
-        missing = [c for c in covariates if c not in df.columns]
-        if missing:
-            raise ValueError(f"Missing covariate columns in df: {missing}")
-
-        # tuple key per row
-        keys = pd.Series(
-            (t for t in df[covariates].itertuples(index=False, name=None)),
-            index=df.index
-        )
-        lo_series = keys.map(lo_val) if isinstance(lo_val, Mapping) else lo_val
-        hi_series = keys.map(hi_val) if isinstance(hi_val, Mapping) else hi_val
-    else:
-        lo_series, hi_series = lo_val, hi_val  # broadcast scalars
-
-    out = df.copy()
-    out[lo_col] = lo_series
-    out[hi_col] = hi_series
-    return out
 
 def add_prediction_interval_to_df(
     df: pd.DataFrame,
@@ -351,52 +304,9 @@ def evaluation_pipeline(
 
     return out
 
-def _evaluation_pipeline(
-        model, 
-        pi: Dict[str, Any], 
-        df: pd.DataFrame, 
-        mgr: DtypeManager, 
-        pi_covariates: List[str] , 
-        ratio: float
-        ) -> Dict[str, Any]:
-    
-
-    # Evaluate point predictions
-    point_prediction = eval_point_prediction(
-        X_new=df,
-        model=model,
-        covariates=list(mgr.dtype_map.keys()),
-        mgr=mgr
-    )
- 
-
-    # Evaluate prediction intervals
-    prediction_interval = eval_prediction_interval(
-        X_new=df,
-        model=pi,
-        covariates=pi_covariates
-    )
-
-    elliptical_results = elliptical_propagation_speed(
-        circular_speed=point_prediction["prediction"], 
-        lo_circular=prediction_interval["lo"], 
-        hi_circular=prediction_interval["hi"], 
-        ratio=ratio)
-    
-    # transform pandas to dict
-    input = df.to_dict(orient="records")[0]
-
-    return {
-        "input": input,
-        "circular_results": point_prediction,
-        "elliptical_results": elliptical_results
-    }
-
-
 
 # --- residual diagnostics functions ---
     
-
 def var_signed(residuals: pd.Series, alpha: float = 0.95, side: str = "upper") -> float:
     r = residuals.to_numpy()
     if side == "upper":   # underprediction tail
