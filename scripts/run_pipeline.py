@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 
 import mlflow
-import shutil
 import argparse
 
 from aywen.logging_setup import configure_logging

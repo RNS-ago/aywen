@@ -19,6 +19,8 @@ import json
 
 
 
+
+
 # # --- Configure logging globally ---
 # logging.basicConfig(
 #     level=logging.INFO,  # Default level (can be changed later)
@@ -406,7 +408,6 @@ def replace_items(lst, replacements):
 # ------ saving artifacts ------
 
 
-logger = logging.getLogger(__name__)
 
 class NpEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -612,9 +613,145 @@ def save_artifacts(
 
     return paths
 
+# ------- loading artifacts -------
 
 
-def load_artifacts(run_id: str, experiment_name):
+def _to_local_path(uri: str) -> Path:
+    """
+    Convert an MLflow file:// URI to a local Path.
+    Works for artifact_location and run.info.artifact_uri.
+    """
+    p = urlparse(uri)
+    if p.scheme and p.scheme != "file":
+        raise ValueError(f"Non-local artifact URI not supported: {uri}")
+    return Path(unquote(p.path.lstrip("/")))
+
+
+def load_artifacts(
+    run_id: str,
+    experiment_name: str,
+    *,
+    # filenames used by your save_artifacts()
+    df_name: str = "data.parquet",
+    model_name: str = "model.pkl",
+    pi_name: str = "pi.json",
+    fuel_mapping_name: str = "fuel_mapping.json",
+    meta_name: str = "meta.json",
+    schema_name: str = "schema.json",
+    metrics_name: str = "metrics.csv",
+    strict: bool = False,
+) -> Dict[str, Any]:
+    """
+    Load artifacts for a local MLflow run (no temp dirs, no remote backends).
+
+    Returns:
+      {
+        'paths': {...},
+        'df': DataFrame|None,
+        'schema': DtypeManager|dict|None,
+        'model': Any|None,
+        'pi': dict|None,
+        'fuel_mapping': dict|None,
+        'meta': dict|None,
+        'metrics': DataFrame|None,
+        'artifact_root': Path
+      }
+    """
+    client = MlflowClient()
+
+    # Validate experiment & run
+    exp = mlflow.get_experiment_by_name(experiment_name)
+    if exp is None:
+        raise ValueError(f"Experiment {experiment_name!r} not found.")
+    run = client.get_run(run_id)
+    if run.info.experiment_id != exp.experiment_id:
+        raise ValueError(
+            f"Run {run_id!r} belongs to experiment_id={run.info.experiment_id}, "
+            f"not {experiment_name!r} (id={exp.experiment_id})."
+        )
+
+    # Resolve local artifact directory for the run
+    # Typical layout: <exp_artifact_location>/<run_id>/artifacts/
+    run_art_root = _to_local_path(run.info.artifact_uri)
+
+    out: Dict[str, Any] = {
+        "paths": {},
+        "df": None,
+        "schema": None,
+        "model": None,
+        "pi": None,
+        "fuel_mapping": None,
+        "meta": None,
+        "metrics": None,
+        "artifact_root": run_art_root,
+    }
+
+    def _read_json(path: Path) -> Optional[dict]:
+        if not path.exists():
+            if strict: raise FileNotFoundError(f"Missing artifact: {path}")
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+        out["paths"][path.name] = str(path.resolve())
+        return obj
+
+    def _maybe(path: Path) -> bool:
+        if path.exists():
+            out["paths"][path.name] = str(path.resolve())
+            return True
+        if strict:
+            raise FileNotFoundError(f"Missing artifact: {path}")
+        return False
+
+    # Load core artifacts (best-effort unless strict=True)
+    df_path = run_art_root / df_name
+    if _maybe(df_path):
+        out["df"] = pd.read_parquet(df_path)
+
+    schema_path = run_art_root / schema_name
+    if schema_path.exists():
+        try:
+            out["schema"] = DtypeManager.load(schema_path)
+        except Exception:
+            out["schema"] = _read_json(schema_path)
+
+    model_path = run_art_root / model_name
+    if _maybe(model_path):
+        out["model"] = joblib.load(model_path)
+
+    pi_path = run_art_root / pi_name
+    if pi_path.exists():
+        raw = _read_json(pi_path)
+        if raw is not None:
+            try:
+                out["pi"] = restore(raw)
+            except Exception:
+                out["pi"] = raw
+
+    fuel_path = run_art_root / fuel_mapping_name
+    if fuel_path.exists():
+        raw = _read_json(fuel_path)
+        if raw is not None:
+            try:
+                out["fuel_mapping"] = restore(raw)
+            except Exception:
+                out["fuel_mapping"] = raw
+
+    meta_path = run_art_root / meta_name
+    if meta_path.exists():
+        out["meta"] = _read_json(meta_path)
+
+    metrics_path = run_art_root / metrics_name
+    if metrics_path.exists():
+        out["metrics"] = pd.read_csv(metrics_path)
+        out["paths"][metrics_path.name] = str(metrics_path.resolve())
+
+    return out
+
+
+
+
+def _load_artifacts(run_id: str, experiment_name: str) -> Dict[str, Any]:
     client = MlflowClient()
     exp = client.get_experiment_by_name(experiment_name)
 

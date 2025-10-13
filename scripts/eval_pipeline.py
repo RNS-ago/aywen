@@ -4,7 +4,6 @@ import argparse
 import json
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import mlflow
 
@@ -90,7 +89,7 @@ def main():
         lg.setLevel(logging.ERROR)   # or CRITICAL
         lg.propagate = False
 
-    # ------- load artifacts from latest run -------
+    # ------- load artifacts from latest run under run-name-------
     mlflow.set_tracking_uri(args.store_path.resolve().as_uri())
     artifacts = load_latest_run(EXPERIMENT_NAME_INPUT, run_name=args.input_run_name)
     mgr = artifacts['schema']
