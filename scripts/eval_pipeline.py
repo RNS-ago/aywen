@@ -65,12 +65,11 @@ def main():
     ap.add_argument("--output", default=None, type=Path)
     ap.add_argument("--experiment-name", default=EXPERIMENT_NAME, type=str)
     ap.add_argument("--input-run-name", default=RUN_NAME, type=str)
-    ap.add_argument("--run-name", default=RUN_NAME, type=str)
+    ap.add_argument("--run-name", default=None, type=str)
     args = ap.parse_args()
 
     if args.output is None:
-        ext = os.path.splitext(args.input.name)[1]
-        args.output = "output" + ext
+        args.output = os.path.basename(args.input.name).replace(".csv", ".parquet")
 
     if args.run_name is None:
         args.run_name = args.input_run_name

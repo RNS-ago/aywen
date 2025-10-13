@@ -13,11 +13,7 @@ from pathlib import Path
 import ast
 from mlflow.tracking import MlflowClient
 from urllib.parse import urlparse, unquote
-
 from sklearn.base import BaseEstimator, TransformerMixin
-import json
-
-
 
 
 
@@ -800,7 +796,7 @@ def _load_artifacts(run_id: str, experiment_name: str) -> Dict[str, Any]:
 
 
 
-def load_latest_run(experiment_name, run_name=None):
+def _load_latest_run(experiment_name, run_name=None):
     client = MlflowClient()
     exp = client.get_experiment_by_name(experiment_name)
     logger.info(
@@ -831,6 +827,101 @@ def load_latest_run(experiment_name, run_name=None):
     run_id = runs[0].info.run_id
     logger.info("Loading artifacts from latest run %s", run_id)
     return load_artifacts(run_id, experiment_name)
+
+
+
+def _escape(s: str) -> str:
+    return s.replace("'", "''")
+
+def _search_runs_paginated(client: MlflowClient, exp_id: str, filter_string: str,
+                           order_by: List[str], page_size: int = 200, max_pages: int = 50):
+    # MlflowClient.search_runs already paginates internally, but some versions cap hard.
+    # This helper just lets us request a bigger page and stop early when we find something.
+    return client.search_runs(
+        [exp_id],
+        filter_string=filter_string,
+        order_by=order_by,
+        max_results=page_size,
+    )
+
+def load_latest_run(
+    experiment_name: str,
+    run_name: Optional[str] = None,
+    *,
+    status: Optional[str] = "FINISHED",   # "FINISHED" | "FAILED" | "RUNNING" | None (no status filter)
+    only_active: bool = True,
+):
+    client = MlflowClient()
+    exp = client.get_experiment_by_name(experiment_name)
+    if exp is None:
+        raise ValueError(f"Experiment {experiment_name!r} not found.")
+
+    logger.info("Using experiment: %s | id: %s | at: %s",
+                exp.name, exp.experiment_id, exp.artifact_location)
+
+    order_by = ["attributes.start_time DESC"]
+
+    def _build_filter(use_attr_run_name: bool, use_status: bool) -> str:
+        parts = []
+        if use_status and status:
+            parts.append(f"attributes.status = '{_escape(status)}'")
+        if run_name:
+            if use_attr_run_name:
+                # newer MLflow supports attributes.run_name
+                parts.append(f"attributes.run_name = '{_escape(run_name)}'")
+            else:
+                # fallback: name is stored as tag
+                parts.append(f"tags.mlflow.runName = '{_escape(run_name)}'")
+        return " and ".join(parts) if parts else ""
+
+    # Try 1: attributes.run_name + (optional) status
+    runs = _search_runs_paginated(client, exp.experiment_id,
+                                  _build_filter(use_attr_run_name=True, use_status=True),
+                                  order_by)
+    # If none, Try 2: tag filter + (optional) status
+    if not runs:
+        runs = _search_runs_paginated(client, exp.experiment_id,
+                                      _build_filter(use_attr_run_name=False, use_status=True),
+                                      order_by)
+    # If still none and we required FINISHED, Try 3: drop status filter
+    if not runs and status:
+        runs = _search_runs_paginated(client, exp.experiment_id,
+                                      _build_filter(use_attr_run_name=True, use_status=False),
+                                      order_by)
+        if not runs:
+            runs = _search_runs_paginated(client, exp.experiment_id,
+                                          _build_filter(use_attr_run_name=False, use_status=False),
+                                          order_by)
+
+    # Filter out deleted client-side if requested
+    if only_active:
+        runs = [r for r in runs if r.info.lifecycle_stage == "active"]
+
+    if not runs:
+        rn = f" with run_name={run_name!r}" if run_name else ""
+        # Quick diagnostic to help you see what's there
+        diag = client.search_runs([exp.experiment_id],
+                                  filter_string="",
+                                  order_by=["attributes.start_time DESC"],
+                                  max_results=10)
+        diag_lines = [
+            f"- {r.info.run_id} | name={r.data.tags.get('mlflow.runName')} | "
+            f"attr_name={getattr(r.data.tags, 'run_name', None)} | status={r.info.status} | stage={r.info.lifecycle_stage}"
+            for r in diag
+        ]
+        raise ValueError(
+            f"No runs found in experiment {experiment_name!r}{rn} with status={status!r}.\n"
+            "Here are the 10 most recent runs:\n" + "\n".join(diag_lines)
+        )
+
+    run = runs[0]
+    logger.info("Selected run %s (name=%s, status=%s, stage=%s)",
+                run.info.run_id, run.data.tags.get("mlflow.runName"),
+                run.info.status, run.info.lifecycle_stage)
+
+    return load_artifacts(run.info.run_id, experiment_name)
+
+
 
 
 

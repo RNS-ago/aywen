@@ -14,6 +14,15 @@ from collections.abc import Mapping
 
 logger = logging.getLogger("aywen_logger")
 
+INPUT_VARIABLES = [
+    "fire_id",
+    "longitude",
+    "latitude",
+    "start_datetime",
+    "temperature",
+    "wind_speed_kmh",
+    "relative_humidity"
+]
 
 def _best_iter_kwargs(model: Any) -> dict:
     kw = {}

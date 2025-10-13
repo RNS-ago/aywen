@@ -42,8 +42,6 @@ for name in ("fiona", "fiona.env", "fiona._env"):
 
 # --------------- miscellaneous ---------------
 
-# constants.py
-
 ID_COLUMNS = ["fire_id"]
 
 GEOSPATIAL_COLUMNS = ["longitude", "latitude"]

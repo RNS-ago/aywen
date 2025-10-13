@@ -25,6 +25,9 @@ DEVELOPMENT.md
 
 *.conda
 
+#notebooks
+notebooks/
+
 # mlflow
 mlruns/
 artifacts/
