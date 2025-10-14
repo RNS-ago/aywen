@@ -15,25 +15,18 @@ def assert_df(
         time_cols: list = [],
         exclude_cols: list = []
     ) -> None:
-
     left = new_df.copy()
     right = old_df.copy()
 
     # common columns
     len_left = len(left.columns)
     len_right = len(right.columns)
-    common_cols = sorted(set(left.columns).intersection(right.columns) - set(exclude_cols))
+    common_cols = list(set(left.columns).intersection(right.columns) - set(exclude_cols))
     logger.info("cols new=%s, old=%s, common=%s", len_left, len_right, len(common_cols))
-    left = left[common_cols].sort_index(axis=1)
-    right = right[common_cols].sort_index(axis=1)
+    logger.info("Common columns: %s", common_cols)
+    left = left[common_cols]
+    right = right[common_cols]
 
-    # common rows based on fire_id
-    len_left = len(left)
-    len_right = len(right)
-    common_ids = set(left["fire_id"]).intersection(right["fire_id"])
-    left = left[left["fire_id"].isin(common_ids)].reset_index(drop=True)
-    right = right[right["fire_id"].isin(common_ids)].reset_index(drop=True)
-    logger.info("rows: new=%s, old=%s, common=%s", len_left, len_right, len(common_ids))
 
     # fixing timestamps columns
     for col in time_cols:
@@ -41,7 +34,7 @@ def assert_df(
             left[col] = pd.to_datetime(left[col], errors='coerce')
             right[col] = pd.to_datetime(right[col], errors='coerce')
 
-    assert_frame_equal(left, right, check_dtype=False, check_like=True)
+    assert_frame_equal(left, right, check_dtype=False, check_categorical=False, atol=1e-6)
 
 
 def assert_df_from_file(

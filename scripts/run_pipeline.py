@@ -129,8 +129,8 @@ def main():
         mlflow.log_metric("MAE_base_test", metrics.loc[('base', 'test'), 'MAE'])
         mlflow.log_metric("MAE_xgb0_train", metrics.loc[('xgb0', 'train+valid'), 'MAE'])
         mlflow.log_metric("MAE_xgb0_test", metrics.loc[('xgb0', 'test'), 'MAE'])
-        mlflow.log_metric("MAE_xgb_train", metrics.loc[('xgb', 'train+valid'), 'MAE'])
-        mlflow.log_metric("MAE_xgb_test", metrics.loc[('xgb', 'test'), 'MAE'])
+        mlflow.log_metric("MAE_xgb_train", metrics.loc[('circular_speed_mm', 'train+valid'), 'MAE'])
+        mlflow.log_metric("MAE_xgb_test", metrics.loc[('circular_speed_mm', 'test'), 'MAE'])
 
         # ------- save artifacts -------
         save_artifacts(

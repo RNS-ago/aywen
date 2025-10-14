@@ -77,7 +77,7 @@ PI_COVARIATES = [
 
 SPLIT_COLUMNS = ["split2", "split3"]
 
-OTHERS = ["zone_alert", "hour", "kitral_fuel"]
+OTHERS = ["zone_alert", "hour"]#, "kitral_fuel"]
 
 DEFAULT_COLUMNS_DICT = {
     "id": ID_COLUMNS,
@@ -883,25 +883,21 @@ def add_kitral_fuel_to_df(
     
     # create a copy
     out = df.copy()
-
-    if fuel_col in out.columns:
-        logger.info("Column %s already exists in df, it will NOT be overwritten.", fuel_col)
-        return out
     
     if not os.path.exists(fuel_tiff_path):
         raise FileNotFoundError(f"Fuel GeoTIFF file not found: {fuel_tiff_path}")
 
-    if fuel_col not in out.columns:
-        out = add_fuel_from_tiff_to_df(
-            out,
-            fuel_tiff_path,
-            lon_col=lon_col,
-            lat_col=lat_col,
-            fuel_col=fuel_col,
-        )
-        logger.info("Added %s.", fuel_col)
-    else:
-        logger.info("Column %s already exists, skipping addition.", fuel_col)
+    if fuel_col in out.columns:
+        out = out.drop(columns=[fuel_col])
+        logger.important("Dropped pre-existing column %s to avoid collision.", fuel_col)
+    out = add_fuel_from_tiff_to_df(
+        out,
+        fuel_tiff_path,
+        lon_col=lon_col,
+        lat_col=lat_col,
+        fuel_col=fuel_col,
+    )
+    logger.info("Added %s.", fuel_col)
 
     # Map codes to descriptions using CODE_KITRAL
     out[fuel_col] = out[fuel_col].map(CODE_KITRAL).fillna("Unknown")
@@ -1413,9 +1409,9 @@ def elliptical_propagation_speed(
 
 def add_elliptical_propagation_speed_to_df(
     df: pd.DataFrame,
-    circular_col: str = 'prediction_xgb',
-    lo_circular_col: str = "lo_xgb",
-    hi_circular_col: str = "hi_xgb",
+    circular_col: str = 'prediction_circular_speed_mm',
+    lo_circular_col: str = "lo_circular_speed_mm",
+    hi_circular_col: str = "hi_circular_speed_mm",
     ratio: float = 3.0,
     prediction_major_axis_speed_mm_col: str = "prediction_major_axis_speed_mm",
     lo_major_axis_speed_mm_col: str = "lo_major_axis_speed_mm",

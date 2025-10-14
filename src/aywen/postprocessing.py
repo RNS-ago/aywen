@@ -417,7 +417,7 @@ def add_groupwise_mapping(
     target_col: str,
     unknown_label: str = "Unknown",
     fill_unmapped: bool = True,   # if False, leave unmapped as NaN
-    cast_target_to_category: bool = False,
+    cast_target_to_category: bool = True,
 ) -> pd.DataFrame:
     """
     Apply a pre-learned mapping from `source_col` → `target_col` within each (factor1, factor2).
@@ -458,8 +458,12 @@ def add_groupwise_mapping(
             out[target_col] = out[target_col].fillna(unknown_label)
 
         if cast_target_to_category:
+            cats = []
+            for (f1, f2), d in mapping.items():
+                if d:  # only if there are learned pairs
+                    cats.extend(d.values())
+            cats = list(set(cats))  # unique
             # categories from the mapping + maybe the unknown label
-            cats = pd.Series(map_df[target_col].dropna().unique()).tolist()
             if fill_unmapped and unknown_label not in cats:
                 cats.append(unknown_label)
             out[target_col] = out[target_col].astype(pd.CategoricalDtype(categories=cats))
@@ -496,6 +500,7 @@ def postprocessing_pipeline(
         }
 
     logger.important("Starting postprocessing pipeline with df.shape=%s", df.shape)
+
 
     out = df.copy()
     out = filter_rows_by_range(out, thresholds)

@@ -275,9 +275,9 @@ def evaluation_pipeline(
         mgr: DtypeManager, 
         pi_covariates: List[str], 
         ratio: float,
-        prediction_col: str = "prediction",
-        lo_col: str = "pi_lo",
-        hi_col: str = "pi_hi"
+        prediction_col: str = "prediction_circular_speed_mm",
+        lo_col: str = "lo_circular_speed_mm",
+        hi_col: str = "hi_circular_speed_mm"
         ) -> Dict[str, Any]:
     
     logger.important("Starting evaluation pipeline")

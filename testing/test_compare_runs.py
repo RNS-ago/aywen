@@ -1,8 +1,9 @@
 import pytest
-from pandas.testing import assert_frame_equal
-
-# adjust import paths
 from aywen.utils import load_latest_run
+import logging
+from aywen.logging_setup import configure_logging
+from aywen.utils import load_latest_run
+from aywen.testing import assert_df
 
 # ---- HARD-CODED VALUES (edit these) ----
 EXPERIMENT1 = "arauco_fire_pipeline"
@@ -12,6 +13,9 @@ EXPERIMENT2 = "arauco_fire_evaluation"
 RUN_NAME2   = "kitral-run"
 # ----------------------------------------
 
+logger = logging.getLogger("aywen_logger")
+logger.setLevel(logging.INFO)
+
 
 def test_loaded_dataframes_on_common_columns_latest_runs():
     loaded1 = load_latest_run(EXPERIMENT1, run_name=RUN_NAME1)
@@ -20,16 +24,10 @@ def test_loaded_dataframes_on_common_columns_latest_runs():
     df1 = loaded1["df"]
     df2 = loaded2["df"]
 
+
     assert df1 is not None, f"No dataframe artifact in latest run for experiment {EXPERIMENT1!r}"
     assert df2 is not None, f"No dataframe artifact in latest run for experiment {EXPERIMENT2!r}"
 
-    # Compare ONLY on common columns
-    common_cols = df1.columns.intersection(df2.columns)
-    assert len(common_cols) > 0, "No common columns between the two dataframes."
+    assert_df(df1, df2, time_cols=["start_datetime"])
 
-    common_cols = list(common_cols)
-    df1c = df1[common_cols].sort_values(by=common_cols).reset_index(drop=True)
-    df2c = df2[common_cols].sort_values(by=common_cols).reset_index(drop=True)
-
-    assert_frame_equal(df1c, df2c, check_exact=True)
 

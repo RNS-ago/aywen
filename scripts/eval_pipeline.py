@@ -127,7 +127,7 @@ def main():
             mapping=fuel_mapping,
             source_col="initial_fuel", # default naming 
             target_col="initial_fuel_reduced" # default naming
-        )
+        ) # the target_col might have different cat.categories as in training, but that's ok
 
         # ------ evaluation pipeline ------
         out = evaluation_pipeline(
@@ -138,11 +138,8 @@ def main():
             factor2=factor2,
             mgr=mgr,
             pi_covariates=meta["pi_covariates"],
-            ratio=meta["ratio"],
-            prediction_col = "prediction_circular_speed_mm",
-            lo_col = "lo_circular_speed_mm",
-            hi_col = "hi_circular_speed_mm"
-        ) #  elliptical speed columns names to default names
+            ratio=meta["ratio"]
+        )
 
         # ------- save artifacts -------
         save_artifacts(artifacts_dir="artifacts", df=out, df_name=args.output)

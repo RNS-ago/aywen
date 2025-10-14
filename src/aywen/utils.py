@@ -506,7 +506,7 @@ def save_artifacts(
                 logger.warning("Could not save schema.json: %s", e)
 
             # quick preview
-            preview_path = adir / name.replace(".parquet", "_preview.csv")
+            preview_path = adir / str(name).replace(".parquet", "_preview.csv")
             try:
                 data.head(50).to_csv(preview_path, index=False)
             except Exception:
@@ -940,7 +940,7 @@ def prepare_long_df(df, cols=None, stubnames=None, i='fire_id', j='model', sep='
             'split2', 
             'propagation_speed_mm',
             'prediction_xgb0','lo_xgb0', 'hi_xgb0',
-            'prediction_xgb','lo_xgb', 'hi_xgb',
+            'prediction_circular_speed_mm','lo_circular_speed_mm', 'hi_circular_speed_mm',
             'prediction_base', 'lo_base', 'hi_base'
         ]
 

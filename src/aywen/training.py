@@ -204,7 +204,7 @@ def train_pipeline(
 
         # Model point predictions
         preds = model.predict(dall)
-        out.loc[df_all.index, "prediction_xgb"] = preds
+        out.loc[df_all.index, "prediction_circular_speed_mm"] = preds
         model_dict[g] = model # final model is stored
 
         # get prediction intervals
@@ -224,12 +224,12 @@ def train_pipeline(
             out.loc[idx, 'hi_xgb0'] = key_series.map(pi0['hi'])
 
         if not pi_covariates:
-            out.loc[idx, 'lo_xgb'] = pi['lo']
-            out.loc[idx, 'hi_xgb'] = pi['hi']
+            out.loc[idx, 'lo_circular_speed_mm'] = pi['lo']
+            out.loc[idx, 'hi_circular_speed_mm'] = pi['hi']
         else:
             key_series = out.loc[idx, pi_covariates].agg(tuple, axis=1)
-            out.loc[idx, 'lo_xgb'] = key_series.map(pi['lo'])
-            out .loc[idx, 'hi_xgb'] = key_series.map(pi['hi'])
+            out.loc[idx, 'lo_circular_speed_mm'] = key_series.map(pi['lo'])
+            out.loc[idx, 'hi_circular_speed_mm'] = key_series.map(pi['hi'])
 
     return out, model_dict, prediction_interval_dict
 
