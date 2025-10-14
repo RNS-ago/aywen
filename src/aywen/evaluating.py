@@ -349,6 +349,12 @@ def relative_mae(y_true: pd.Series, y_pred: pd.Series) -> float:
     mae_baseline = np.mean(np.abs(y_true - np.mean(y_true)))
     return mae_model / mae_baseline
 
+def risk_factor(y_true: pd.Series, y_pred: pd.Series) -> float:
+    y_true_mean = float(np.nanmean(y_true))
+    y_pred_mean = float(np.nanmean(y_pred))
+    return np.nan if np.isclose(y_pred_mean, 0.0) else y_true_mean / y_pred_mean
+
+
 
 # --- function for groupby apply ---
 def residual_diagnostics(group: pd.DataFrame, y_true: str, y_pred: str, cutoff: float) -> pd.Series:
@@ -357,6 +363,7 @@ def residual_diagnostics(group: pd.DataFrame, y_true: str, y_pred: str, cutoff: 
     r = y - yhat
 
     return pd.Series({
+        "n": len(r),
         "RMSE": np.sqrt(np.mean(r**2)),
         "MAE": np.mean(np.abs(r)),
         "RelativeMAE": relative_mae(y, yhat),
@@ -365,7 +372,8 @@ def residual_diagnostics(group: pd.DataFrame, y_true: str, y_pred: str, cutoff: 
         "VaRUnder": var_signed(r, cutoff, "upper"),
         "VaROver": var_signed(r, cutoff, "lower"),
         "CVaRUnder": cvar_signed(r, cutoff, "upper"),
-        "CVaROver": cvar_signed(r, cutoff, "lower")
+        "CVaROver": cvar_signed(r, cutoff, "lower"),
+        "RiskFactor": risk_factor(y, yhat)
     })
 
 

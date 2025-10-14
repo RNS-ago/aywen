@@ -65,7 +65,7 @@ def main():
     logger = logging.getLogger("aywen_logger")
     logger.handlers.clear()            # child has no handlers
     logger.propagate = True            # let root handle
-    logger.important("Starting full pipeline")
+    logger.info("Starting full pipeline")
 
     # --- MLflow setup ---
     mlflow.set_tracking_uri(args.store_path.as_uri())

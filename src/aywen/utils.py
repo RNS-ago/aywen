@@ -506,7 +506,7 @@ def save_artifacts(
                 logger.warning("Could not save schema.json: %s", e)
 
             # quick preview
-            preview_path = adir / str(name).replace(".parquet", "_preview.csv")
+            preview_path = adir / name.replace(".parquet", "_preview.csv")
             try:
                 data.head(50).to_csv(preview_path, index=False)
             except Exception:
