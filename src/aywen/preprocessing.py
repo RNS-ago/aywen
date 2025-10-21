@@ -325,7 +325,7 @@ def standardize_dispatch_reports_ID_and_fliter(
             df = df[df[report_type_column].isin(selected_report_types)]
 
         # Standardize the fire dispatch ID
-        df.loc[:, standard_fire_dispatch_id_column] = df[fire_id_column].astype(str) + df[dispatch_id_column].astype(str)
+        df.loc[:, standard_fire_dispatch_id_column] = (df[fire_id_column].astype(str) + df[dispatch_id_column].astype(str)).astype("Int64")
         df = df[df[fire_id_column].astype(str).str.len() == fire_id_length]
         
         # Filter only unique dispatchs, keeping the first one
@@ -406,7 +406,7 @@ def _normalize_glosa_df1(s: pd.Series) -> pd.Series:
     out = out.str.replace(r'^A(\d+)\b', r'AA\1', regex=True)
 
     # Brigades: B123 -> BA123
-    out = out.str.replace(r'^B(\d+)\b', r'BA\1', regex=True)
+    out = out.str.replace(r'^B(\d+)\b.*', r'BA\1', regex=True)
 
     return out
 
@@ -424,8 +424,8 @@ def _normalize_glosa_df2(s: pd.Series) -> pd.Series:
     out = s.astype(str)
 
     # HELO: BHA… keep only first token, remove - or spaces
-    out = out.str.replace(r'^(BHA[\d\s-]+).*$', r'\1', regex=True)
-    out = out.str.replace(r'[-\s]', '', regex=True)
+    out = out.str.replace(r'^(BHA-(\d+)).*$', r'BHA\2', regex=True)
+    #out = out.str.replace(r'[-\s]', '', regex=True)
 
     # Aircraft: AA… keep only first token
     out = out.str.replace(r'^(AA\d+).*$', r'\1', regex=True)
@@ -801,7 +801,7 @@ def normalize_and_validate_surface_area_data(fire_df: pd.DataFrame) -> pd.DataFr
 
 
 def reorder_hr_columns(dispatch_df: pd.DataFrame) -> pd.DataFrame:
-    """"
+    """
     Reorder HR columns in a DataFrame.
     
     Parameters:
@@ -828,14 +828,14 @@ def reorder_hr_columns(dispatch_df: pd.DataFrame) -> pd.DataFrame:
     cols = [c for c in dispatch_df.columns if c.startswith("hr_")]
 
     for c in cols:
-        dispatch_df.loc[:,c] = pd.to_datetime(dispatch_df[c].astype(str).str.strip(), format="%Y-%m-%d %H:%M", errors="coerce")
+        dispatch_df.loc[:,c] = pd.to_datetime(dispatch_df[c], errors="coerce")
 
     #dispatch_df = dispatch_df.dropna(subset=cols)
     
-    reordered_df = dispatch_df.sort_values(by=cols, ascending=True)
+    #reordered_df = dispatch_df.sort_values(by=cols, ascending=True)
     
     logger.info("Successfully reordered HR columns.")
-    return reordered_df
+    return dispatch_df
 
 
 def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_columns: list[str] = ['fire_id', 'start_datetime', 'arrival_datetime_inc', 'control_datetime', 'season'], on: str = "fire_id") -> pd.DataFrame:
@@ -886,11 +886,14 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
         if col in dispatch_df.columns:
             dispatch_df = dispatch_df.drop(columns=[col])
         if col.endswith('_datetime'):
-            right_df.loc[:, col] = pd.to_datetime(right_df[col].astype(str).str.strip(), format="%Y-%m-%d %H:%M:%S", errors="coerce")
+            right_df.loc[:, col] = pd.to_datetime(right_df[col], errors="coerce")
     
                 
     merged_df = pd.merge(left=dispatch_df, right=right_df, on=on, how='left')
 
+    for datetime_column in merged_df.columns[merged_df.columns.str.contains('datetime')]:
+        merged_df.loc[:, datetime_column] = pd.to_datetime(merged_df[datetime_column], errors="coerce")
+    
     logger.info("Successfully merged dataframes.")
     return merged_df
 

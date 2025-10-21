@@ -13,10 +13,13 @@ def assert_df(
         new_df: pd.DataFrame, 
         old_df: pd.DataFrame,
         time_cols: list = [],
+        numeric_cols: list = [],
         exclude_cols: list = []
     ) -> None:
     left = new_df.copy()
     right = old_df.copy()
+    
+    
 
     # common columns
     len_left = len(left.columns)
@@ -24,8 +27,8 @@ def assert_df(
     common_cols = list(set(left.columns).intersection(right.columns) - set(exclude_cols))
     logger.info("cols new=%s, old=%s, common=%s", len_left, len_right, len(common_cols))
     logger.info("Common columns: %s", common_cols)
-    left = left[common_cols]
-    right = right[common_cols]
+    left = left[common_cols].reset_index(drop=True)
+    right = right[common_cols].reset_index(drop=True)
 
 
     # fixing timestamps columns
@@ -34,18 +37,25 @@ def assert_df(
             left[col] = pd.to_datetime(left[col], errors='coerce')
             right[col] = pd.to_datetime(right[col], errors='coerce')
 
-    assert_frame_equal(left, right, check_dtype=False, check_categorical=False, atol=1e-6)
+    # fixing numeric columns
+    for col in numeric_cols:
+        if col in right.columns:
+            left[col] = pd.to_numeric(left[col], errors='coerce')
+            right[col] = pd.to_numeric(right[col], errors='coerce')
+
+    assert_frame_equal(left, right, check_dtype=False, check_like=True)
 
 
 def assert_df_from_file(
         df : pd.DataFrame,
         filename : str,
         time_cols: list = [],
+        numeric_cols: list = [],
         exclude_cols: list = []
     ) -> None:
     
     # Read old dataframe
-    old_df = pd.read_csv(filename)
+    old_df = pd.read_csv(filename, low_memory=False)
     # Ensure factor2 is clean integer-like strings ("1"..."5")
     factor2 = 'zone_NS'
     if factor2 in old_df.columns and factor2 in df.columns:
@@ -56,7 +66,7 @@ def assert_df_from_file(
     old_df = mgr.apply(old_df, drop_extras=False, include=include)
 
     # Call assert_df
-    assert_df(df, old_df, time_cols=time_cols, exclude_cols=exclude_cols)
+    assert_df(df, old_df, time_cols=time_cols, numeric_cols=numeric_cols, exclude_cols=exclude_cols)
 
 
 

@@ -55,7 +55,7 @@ from aywen.training import train_pipeline,  add_elliptical_propagation_speed_to_
 from aywen.testing import assert_df_from_file, assert_predictions_match
 
 # --- Define paths ---
-DIR_ROOT =  "G:/Shared drives/OpturionHome/AraucoFire"
+DIR_ROOT =  "C:/Users/ago/Downloads/projecto alfredo/AraucoFire"
 DATA_ORIGINAL = DIR_ROOT + "/2_data/original"
 DATA_PROCESSED = DIR_ROOT + "/2_data/processed"
 
@@ -123,8 +123,11 @@ time_cols = [
  'arrival_datetime_inc',
  'control_datetime',
  'extinction_datetime',
- 'start_day'
+ 'start_day',
+ 'hr_despacho', 'hr_salida', 'hr_arribo', 'hr_combate', 'hr_tl', 'hr_control', 'hr_liquidacion', 'hr_extincion', 'hr_retiro', 'hr_llegada'
 ]
+
+numeric_cols = ['lz_agua', 'lz_reta', 'lz_espu']
 
 
 # --- Pytest-wrapped tests (moved from module-level calls) ---
@@ -132,9 +135,16 @@ time_cols = [
 def test_preprocessing_pipeline():
     assert_df_from_file(
         df=fire_df,
-        filename=DATA_PROCESSED + "/data_workflow/2_2_incendios_2014-2025.csv",
+        filename=DATA_PROCESSED + "/data_workflow/1_2_incendios_2014-2025.csv",
         time_cols=time_cols,
-        exclude_cols=['control_datetime', 'start_time']
+        exclude_cols=['start_time']
+    )
+    assert_df_from_file(
+        df=dispatch_df,
+        filename=DATA_PROCESSED + "/data_workflow/1_2_despachos_2014-2025.csv",
+        time_cols=time_cols,
+        numeric_cols=numeric_cols,
+        exclude_cols=[]
     )
 
 def test_feature_engineering_pipeline():
