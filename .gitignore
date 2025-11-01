@@ -28,6 +28,3 @@ DEVELOPMENT.md
 
 # mlflow
 mlruns/
-
-# other
-./notebooks/playground.ipynb
