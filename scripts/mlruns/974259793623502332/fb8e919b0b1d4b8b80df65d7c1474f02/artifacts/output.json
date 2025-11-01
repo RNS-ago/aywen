@@ -1,0 +1,31 @@
+[
+  {
+    "fire_id": 215011234,
+    "longitude": -73.19036117,
+    "latitude": -37.20974446,
+    "start_datetime": "2018-02-09 16:11:00",
+    "temperature": 19.17,
+    "wind_speed_kmh": 35.424,
+    "relative_humidity": 42.12,
+    "zone_alert": "Costa 3",
+    "zone_WE": "Costa",
+    "zone_NS": "3",
+    "hour": 16,
+    "sin_hour": -0.8660254037844385,
+    "cos_hour": -0.5000000000000004,
+    "slope_degrees": 18.637922286987305,
+    "diurnal_nocturnal": "diurnal",
+    "high_season": "high",
+    "initial_fuel": "Plantaciones Eucalipto Adultas (>10)",
+    "initial_fuel_reduced": "Plantaciones Eucalipto Adultas (>10)",
+    "prediction_circular_speed_mm": 2.056884765625,
+    "lo_circular_speed_mm": -0.9623359517325003,
+    "hi_circular_speed_mm": 1.9917036101709136,
+    "prediction_major_axis_speed_mm": 3.562628919376902,
+    "lo_major_axis_speed_mm": -1.6668147623508411,
+    "hi_major_axis_speed_mm": 3.449731846434379,
+    "prediction_minor_axis_speed_mm": 1.1875429731256342,
+    "lo_minor_axis_speed_mm": -0.5556049207836137,
+    "hi_minor_axis_speed_mm": 1.1499106154781262
+  }
+]

@@ -1,0 +1,47 @@
+{
+  "(Costa, 3)": {
+    "input": {
+      "fire_id": 215011234,
+      "longitude": -73.190361,
+      "latitude": -37.209744,
+      "start_datetime": "2018-02-09 16:11:00",
+      "temperature": 19.17,
+      "wind_speed_kmh": 35.424,
+      "relative_humidity": 42.12,
+      "zone_alert": "Costa 3",
+      "zone_WE": "Costa",
+      "zone_NS": "3",
+      "hour": 16,
+      "sin_hour": -0.8660254037844385,
+      "cos_hour": -0.5000000000000004,
+      "slope_degrees": 18.637922286987305,
+      "diurnal_nocturnal": "diurnal",
+      "high_season": "high",
+      "initial_fuel": "Plantaciones Eucalipto Adultas (>10)",
+      "initial_fuel_reduced": "Plantaciones Eucalipto Adultas (>10)"
+    },
+    "circular_results": {
+      "prediction": 2.056884765625,
+      "base_value": 1.0364487171173096,
+      "shap_values": {
+        "temperature": 0.09428764134645462,
+        "wind_speed_kmh": 0.31696200370788574,
+        "relative_humidity": 0.31168124079704285,
+        "slope_degrees": 0.21857665479183197,
+        "sin_hour": -0.09525077044963837,
+        "cos_hour": -0.14834922552108765,
+        "initial_fuel_reduced": 0.33242711424827576,
+        "diurnal_nocturnal": -0.008254333399236202,
+        "high_season": -0.0016442210180684924
+      }
+    },
+    "elliptical_results": {
+      "prediction_major_axis_speed_mm": 3.562628919376902,
+      "lo_major_axis_speed_mm": -1.6668147623508411,
+      "hi_major_axis_speed_mm": 3.449731846434379,
+      "prediction_minor_axis_speed_mm": 1.1875429731256342,
+      "lo_minor_axis_speed": -0.5556049207836137,
+      "hi_minor_axis_speed": 1.1499106154781262
+    }
+  }
+}

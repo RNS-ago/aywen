@@ -1,0 +1,66 @@
+{
+  "temperature": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "wind_speed_kmh": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "relative_humidity": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "slope_degrees": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "sin_hour": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "cos_hour": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "initial_fuel_reduced": {
+    "type": "category",
+    "categories": [
+      "Matorral, Arbustos y O.Especies",
+      "Pi > de 14 anos con manejo",
+      "Pi de 4 - 7 anos sin manejo",
+      "Desecho de cosecha",
+      "Pi de 4 - 7 anos con manejo",
+      "Pi de 0 - 3 anos",
+      "other",
+      "Pi de 8 - 13 anos con manejo",
+      "Euca de 4 - 7 anos",
+      "Euca de 0 - 3 anos",
+      "Pastizal",
+      "Euca > 8 anos",
+      "Pi > de 14 anos sin manejo",
+      "Pi de 8 - 13 anos sin manejo",
+      "Otros Combustibles No Vegetales",
+      "Desecho Agricola",
+      "Bosque nativo",
+      "Aserrin o Corteza en Acopio"
+    ],
+    "ordered": false
+  },
+  "diurnal_nocturnal": {
+    "type": "category",
+    "categories": [
+      "diurnal",
+      "nocturnal"
+    ],
+    "ordered": true
+  },
+  "high_season": {
+    "type": "category",
+    "categories": [
+      "low",
+      "high"
+    ],
+    "ordered": true
+  }
+}

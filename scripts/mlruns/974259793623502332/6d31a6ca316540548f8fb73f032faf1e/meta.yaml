@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/lopez/GitRepos/aywen/scripts/mlruns/974259793623502332/6d31a6ca316540548f8fb73f032faf1e/artifacts
+deleted_time: 1760288884607
+end_time: 1760288859858
+entry_point_name: ''
+experiment_id: '974259793623502332'
+lifecycle_stage: deleted
+run_id: 6d31a6ca316540548f8fb73f032faf1e
+run_name: default-json-run
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760288858177
+status: 3
+tags: []
+user_id: lopez

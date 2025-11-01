@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/lopez/GitRepos/aywen/scripts/mlruns/974259793623502332/8ed3ca4a511b49deabcf3f2fa16a99f5/artifacts
+deleted_time: 1760382012267
+end_time: 1760381808375
+entry_point_name: ''
+experiment_id: '974259793623502332'
+lifecycle_stage: deleted
+run_id: 8ed3ca4a511b49deabcf3f2fa16a99f5
+run_name: default-icsv-run
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760381806605
+status: 3
+tags: []
+user_id: lopez

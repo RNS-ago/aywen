@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/lopez/GitRepos/aywen/scripts/mlruns/403323801140861685/31cc89c631c1403d8d4feca58107dd14/artifacts
+deleted_time: 1760188196538
+end_time: 1760183049331
+entry_point_name: ''
+experiment_id: '403323801140861685'
+lifecycle_stage: deleted
+run_id: 31cc89c631c1403d8d4feca58107dd14
+run_name: kitral
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760183030357
+status: 4
+tags: []
+user_id: lopez

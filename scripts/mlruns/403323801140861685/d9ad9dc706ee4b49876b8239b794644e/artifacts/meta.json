@@ -1,0 +1,29 @@
+{
+  "factors": [
+    "zone_WE",
+    "zone_NS"
+  ],
+  "covariates": [
+    "temperature",
+    "wind_speed_kmh",
+    "relative_humidity",
+    "slope_degrees",
+    "sin_hour",
+    "cos_hour",
+    "initial_fuel_reduced",
+    "diurnal_nocturnal",
+    "high_season"
+  ],
+  "covariates_categorical": [
+    "initial_fuel_reduced",
+    "diurnal_nocturnal",
+    "high_season"
+  ],
+  "pi_covariates": [
+    "diurnal_nocturnal",
+    "high_season"
+  ],
+  "target": "propagation_speed_mm",
+  "alpha": 0.1,
+  "ratio": 3.0
+}

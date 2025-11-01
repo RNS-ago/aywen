@@ -1,0 +1,118 @@
+{
+  "fire_id": {
+    "type": "other",
+    "dtype": "int64"
+  },
+  "longitude": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "latitude": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "start_datetime": {
+    "type": "other",
+    "dtype": "object"
+  },
+  "temperature": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "wind_speed_kmh": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "relative_humidity": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "zone_alert": {
+    "type": "other",
+    "dtype": "object"
+  },
+  "zone_WE": {
+    "type": "other",
+    "dtype": "object"
+  },
+  "zone_NS": {
+    "type": "other",
+    "dtype": "object"
+  },
+  "hour": {
+    "type": "other",
+    "dtype": "int32"
+  },
+  "sin_hour": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "cos_hour": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "slope_degrees": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "diurnal_nocturnal": {
+    "type": "category",
+    "categories": [
+      "diurnal",
+      "nocturnal"
+    ],
+    "ordered": true
+  },
+  "high_season": {
+    "type": "category",
+    "categories": [
+      "low",
+      "high"
+    ],
+    "ordered": true
+  },
+  "initial_fuel": {
+    "type": "other",
+    "dtype": "object"
+  },
+  "initial_fuel_reduced": {
+    "type": "other",
+    "dtype": "object"
+  },
+  "prediction_circular_speed_mm": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "lo_circular_speed_mm": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "hi_circular_speed_mm": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "prediction_major_axis_speed_mm": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "lo_major_axis_speed_mm": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "hi_major_axis_speed_mm": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "prediction_minor_axis_speed_mm": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "lo_minor_axis_speed_mm": {
+    "type": "other",
+    "dtype": "float64"
+  },
+  "hi_minor_axis_speed_mm": {
+    "type": "other",
+    "dtype": "float64"
+  }
+}
