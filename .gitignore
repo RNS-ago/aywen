@@ -25,3 +25,6 @@ DEVELOPMENT.md
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# mlflow
+mlruns/
