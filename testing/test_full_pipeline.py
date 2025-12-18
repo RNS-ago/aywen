@@ -50,12 +50,12 @@ from aywen.logging_setup import configure_logging
 from aywen.preprocessing import preprocessing_pipeline
 from aywen.fire_features import feature_engineering_pipeline
 from aywen.postprocessing import postprocessing_pipeline
-from aywen.fire_features import DEFAULT_COLUMNS_DICT
-from aywen.training import train_pipeline,  add_elliptical_propagation_speed_to_df, add_base_model_predictions_to_df
+from aywen.fire_features import DEFAULT_COLUMNS_DICT, add_elliptical_propagation_speed_to_df
+from aywen.training import train_pipeline, add_base_model_predictions_to_df
 from aywen.testing import assert_df_from_file, assert_predictions_match
 
 # --- Define paths ---
-DIR_ROOT =  "C:/Users/ago/Downloads/projecto alfredo/AraucoFire"
+DIR_ROOT =  "G:/Shared drives/OpturionHome/AraucoFire"
 DATA_ORIGINAL = DIR_ROOT + "/2_data/original"
 DATA_PROCESSED = DIR_ROOT + "/2_data/processed"
 
@@ -95,7 +95,7 @@ fire_df, dispatch_df = preprocessing_pipeline(FIRE_CSVS, DISPATCH_CSVS)
 fire_df_fe = feature_engineering_pipeline(fire_df, zone_shapefile_path=ZONE_SHAPEFILE_PATH, topo_csv_path=TOPO_CSV_PATH, fuel_tiff_path=TIFF_FUEL_PATH)
 
 # --------- postprocessing pipeline ---------
-fire_df_post = postprocessing_pipeline(fire_df_fe)
+fire_df_post, _ = postprocessing_pipeline(fire_df_fe)
 
 # ---------  training pipeline ---------
 factor1 = factors[0]  # "zone_WE"
