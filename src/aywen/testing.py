@@ -84,7 +84,7 @@ def assert_predictions_match(df, pp_dict, covariates, factor1, factor2):
     f1 = random_row[factor1].values[0]
     f2 = random_row[factor2].values[0]
     model = pp_dict[(f1, f2)]
-    pred_random = random_row['prediction_xgb'].iloc[0]
+    pred_random = random_row['prediction_xgb0'].iloc[0]
 
     # Build df_new from the same row, enforcing the same order & copy
     X_random = random_row[covariates].iloc[0].to_dict()
