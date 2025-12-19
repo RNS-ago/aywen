@@ -9,9 +9,6 @@ wheels/
 # Virtual environments
 .venv/
 
-# Test output
-testing/
-
 # Data
 *.csv
 *.shp
@@ -26,5 +23,13 @@ DEVELOPMENT.md
 .pixi/*
 !.pixi/config.toml
 
+*.conda
+
+#notebooks
+notebooks/
+
+# mlflow
+mlruns/
+artifacts/
 # mlflow
 mlruns/

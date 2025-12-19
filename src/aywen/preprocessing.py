@@ -5,7 +5,7 @@ import os
 import pandas as pd
 import re
 
-from .utils import log_step, concatnate_name_from_paths
+from .utils import concatnate_name_from_paths
 
 
 logger = logging.getLogger("aywen_logger")
@@ -325,7 +325,7 @@ def standardize_dispatch_reports_ID_and_fliter(
             df = df[df[report_type_column].isin(selected_report_types)]
 
         # Standardize the fire dispatch ID
-        df.loc[:, standard_fire_dispatch_id_column] = df[fire_id_column].astype(str) + df[dispatch_id_column].astype(str)
+        df.loc[:, standard_fire_dispatch_id_column] = (df[fire_id_column].astype(str) + df[dispatch_id_column].astype(str)).astype("Int64")
         df = df[df[fire_id_column].astype(str).str.len() == fire_id_length]
         
         # Filter only unique dispatchs, keeping the first one
@@ -406,7 +406,7 @@ def _normalize_glosa_df1(s: pd.Series) -> pd.Series:
     out = out.str.replace(r'^A(\d+)\b', r'AA\1', regex=True)
 
     # Brigades: B123 -> BA123
-    out = out.str.replace(r'^B(\d+)\b', r'BA\1', regex=True)
+    out = out.str.replace(r'^B(\d+)\b.*', r'BA\1', regex=True)
 
     return out
 
@@ -424,8 +424,8 @@ def _normalize_glosa_df2(s: pd.Series) -> pd.Series:
     out = s.astype(str)
 
     # HELO: BHA… keep only first token, remove - or spaces
-    out = out.str.replace(r'^(BHA[\d\s-]+).*$', r'\1', regex=True)
-    out = out.str.replace(r'[-\s]', '', regex=True)
+    out = out.str.replace(r'^(BHA-(\d+)).*$', r'BHA\2', regex=True)
+    #out = out.str.replace(r'[-\s]', '', regex=True)
 
     # Aircraft: AA… keep only first token
     out = out.str.replace(r'^(AA\d+).*$', r'\1', regex=True)
@@ -801,7 +801,7 @@ def normalize_and_validate_surface_area_data(fire_df: pd.DataFrame) -> pd.DataFr
 
 
 def reorder_hr_columns(dispatch_df: pd.DataFrame) -> pd.DataFrame:
-    """"
+    """
     Reorder HR columns in a DataFrame.
     
     Parameters:
@@ -828,17 +828,17 @@ def reorder_hr_columns(dispatch_df: pd.DataFrame) -> pd.DataFrame:
     cols = [c for c in dispatch_df.columns if c.startswith("hr_")]
 
     for c in cols:
-        dispatch_df.loc[:,c] = pd.to_datetime(dispatch_df[c].astype(str).str.strip(), format="%Y-%m-%d %H:%M", errors="coerce")
+        dispatch_df.loc[:,c] = pd.to_datetime(dispatch_df[c], errors="coerce")
 
     #dispatch_df = dispatch_df.dropna(subset=cols)
     
-    reordered_df = dispatch_df.sort_values(by=cols, ascending=True)
+    #reordered_df = dispatch_df.sort_values(by=cols, ascending=True)
     
     logger.info("Successfully reordered HR columns.")
-    return reordered_df
+    return dispatch_df
 
 
-def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_columns: list[str] = ['fire_id', 'start_datetime', 'arrival_datetime_inc', 'control_datetime', 'season'], dispatch_df_columns: list[str] = None, on: str = "fire_id") -> pd.DataFrame:
+def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_columns: list[str] = ['fire_id', 'start_datetime', 'arrival_datetime_inc', 'control_datetime', 'season'], on: str = "fire_id") -> pd.DataFrame:
     """"
     Merge two DataFrames based on a common id column.
     
@@ -846,7 +846,6 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
         fire_df (pd.DataFrame): The first DataFrame to merge.
         dispatch_df (pd.DataFrame): The second DataFrame to merge.
         fire_df_columns (list[str]): The list of columns to keep from fire_df.
-        dispatch_df_columns (list[str]): The list of columns to keep from dispatch_df.
         on (str): The column to merge on.
         
     Returns:
@@ -854,7 +853,7 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
     """
     
     # --- Call args (debug) ---
-    logger.debug("called with fire_df.shape=%s, dispatch_df.shape=%s, fire_df_columns=%s, dispatch_df_columns=%s, on=%s", fire_df.shape, dispatch_df.shape, fire_df_columns, dispatch_df_columns, on)
+    logger.debug("called with fire_df.shape=%s, dispatch_df.shape=%s, fire_df_columns=%s, on=%s", fire_df.shape, dispatch_df.shape, fire_df_columns, on)
     
     # --- Validate input ---
     try:
@@ -864,8 +863,6 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
             raise TypeError(f"dispatch_df must be a pandas DataFrame, got {type(dispatch_df).__name__}.")
         if not isinstance(fire_df_columns, list):
             raise TypeError(f"fire_df_columns must be a list, got {type(fire_df_columns).__name__}.")
-        if not isinstance(dispatch_df_columns, list):
-            raise TypeError(f"dispatch_df_columns must be a list, got {type(dispatch_df_columns).__name__}.")
         if not isinstance(on, str):
             raise TypeError(f"on must be a string, got {type(on).__name__}.")
         if on not in fire_df.columns:
@@ -889,11 +886,14 @@ def merge_dataframes(fire_df: pd.DataFrame, dispatch_df: pd.DataFrame, fire_df_c
         if col in dispatch_df.columns:
             dispatch_df = dispatch_df.drop(columns=[col])
         if col.endswith('_datetime'):
-            right_df.loc[:, col] = pd.to_datetime(right_df[col].astype(str).str.strip(), format="%Y-%m-%d %H:%M:%S", errors="coerce")
+            right_df.loc[:, col] = pd.to_datetime(right_df[col], errors="coerce")
     
                 
     merged_df = pd.merge(left=dispatch_df, right=right_df, on=on, how='left')
 
+    for datetime_column in merged_df.columns[merged_df.columns.str.contains('datetime')]:
+        merged_df.loc[:, datetime_column] = pd.to_datetime(merged_df[datetime_column], errors="coerce")
+    
     logger.info("Successfully merged dataframes.")
     return merged_df
 
@@ -996,12 +996,15 @@ def merge_and_analyze(df, dfd):
     # error
     merged['time_diff'] = (merged['arrival_datetime_inc'] - merged['hr_arribo']).dt.total_seconds() / 60
 
-    print(f"Number of records with positive time difference: {merged[merged['time_diff'] > 0].shape[0]} out of {merged.shape[0]}")
-    print(f"Number of records with negative time difference: {merged[merged['time_diff'] < 0].shape[0]} out of {merged.shape[0]}")
-    print(f"Number of records with zero time difference: {merged[merged['time_diff'] == 0].shape[0]} out of {merged.shape[0]}")
+    # print(f"Number of records with positive time difference: {merged[merged['time_diff'] > 0].shape[0]} out of {merged.shape[0]}")
+    # print(f"Number of records with negative time difference: {merged[merged['time_diff'] < 0].shape[0]} out of {merged.shape[0]}")
+    # print(f"Number of records with zero time difference: {merged[merged['time_diff'] == 0].shape[0]} out of {merged.shape[0]}")
 
 
 def preprocessing_pipeline(fire_data_paths: list[str], dispatch_data_paths: list[str], output_dir: str = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+
+    logger.important("Starting preprocessing pipeline")
+
     # Load datasets
     fire_dfs = load_datasets(fire_data_paths)
     dispatch_dfs = load_datasets(dispatch_data_paths)
@@ -1048,7 +1051,7 @@ def preprocessing_pipeline(fire_data_paths: list[str], dispatch_data_paths: list
     
     
     # Daylight saving time error
-    dispatch_df = detect_and_fix_time_anomalies(fire_df, dispatch_df)
+    dispatch_df = detect_and_fix_time_anomalies(fire_df, dispatch_df, return_report=False)
     
     
     merge_and_analyze(fire_df, dispatch_df)

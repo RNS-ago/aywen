@@ -11,13 +11,7 @@ requires-python = ">=3.11"
 authors = [
     {name = "ago-RNS", email = "your.actual.email@example.com"}
 ]
-dependencies = [
-    "geopandas>=1.1.1",
-    "numpy>=2.3.2",
-    "pandas>=2.3.1",
-    "scikit-learn>=1.7.1",
-    "tqdm>=4.67.1",
-]
+dependencies = []
 
 # --- Pixi workspace / env config ---
 [tool.pixi.workspace]
@@ -34,24 +28,33 @@ aywen = { path = ".", editable = true }
 # Conda build (goes to dist/conda)
 build-conda = "pixi build -o dist/conda"
 
-# Wheel build (goes to dist/pypi)
-build-wheel = "python -m build --wheel --outdir dist/pypi"
-
-# Source dist (goes to dist/pypi)
-build-sdist = "python -m build --sdist --outdir dist/pypi"
-
-# Convenience: build all
-# PowerShell variant
-build-all = "powershell -NoProfile -Command \"pixi run build-conda; pixi run build-wheel; pixi run build-sdist\""
-# (Optional) Bash variant if you also use Linux/macOS:
-# build-all = "sh -lc 'pixi run build-conda && pixi run build-wheel && pixi run build-sdist'"
-
-
 
 # Prefer Conda packages where available; these override the PyPI deps at solve time.
 [tool.pixi.dependencies]
-richdem = ">=2.3.0,<3"
+python = "3.11.*"
+
 python-build = "*"
+ipykernel = ">=6.30.1,<7"
+pytest = ">=8.4.2,<9"
+
+richdem = ">=2.3.0,<3"
+optuna = ">=4.5.0,<5"
+optuna-integration = "*"
+xgboost = ">=3.0.5,<4"
+seaborn = ">=0.13.2,<0.14"
+rasterio = ">=1.4.3,<2"
+gdal = ">=3.10.3,<4"
+geopandas = ">=1.1.1"
+numpy = ">=2.0.0"
+pandas = ">=2.3.1"
+scikit-learn = ">=1.7.1"
+tqdm = ">=4.67.1"
+shap = ">=0.48.0,<0.49"
+fiona = ">=1.10.1,<2"
+pyproj = ">=3.7.2,<4"
+proj = ">=9.7.0,<10"
+proj-data = ">=1.23,<2"
+mlflow = ">=3.2.0,<4"
 
 # --- Pixi "build a conda package" configuration ---
 # This is the key new section: it tells Pixi how to turn your Python package into a .conda.
