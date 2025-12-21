@@ -30,6 +30,6 @@ notebooks/
 
 # mlflow
 mlruns/
-artifacts/
+scripts/artifacts/
 # mlflow
 mlruns/
