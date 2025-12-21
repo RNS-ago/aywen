@@ -28,5 +28,8 @@ DEVELOPMENT.md
 # mlflow
 mlruns/
 scripts/artifacts/
-# mlflow
-mlruns/
+
+# ipynb files
+*.ipynb
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/*
