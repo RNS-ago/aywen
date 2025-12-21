@@ -93,7 +93,7 @@ def assert_predictions_match(df, pp_dict, covariates, factor1, factor2):
     f1 = random_row[factor1].values[0]
     f2 = random_row[factor2].values[0]
     model = pp_dict[(f1, f2)]
-    pred_random = random_row['prediction_xgb'].iloc[0]
+    pred_random = random_row['prediction_circular_speed_mm'].iloc[0]
 
     # Build df_new from the same row, enforcing the same order & copy
     X_random = random_row[covariates].iloc[0].to_dict()
@@ -104,7 +104,7 @@ def assert_predictions_match(df, pp_dict, covariates, factor1, factor2):
 
      # predict with _add_prediction_to_df
     result = _add_prediction_to_df(df=df_new, model=model, covariates=covariates, mgr=mgr, prediction_col="prediction")
-    pred_eval = result['prediction']
+    pred_eval = result['prediction'].values[0]
 
     logger.info("Prediction at random row = %s", pred_random)
     logger.info("Prediction with xgboost = %s", pred_xgb)

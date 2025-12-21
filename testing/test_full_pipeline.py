@@ -137,38 +137,38 @@ numeric_cols = ['lz_agua', 'lz_reta', 'lz_espu']
 
 # --- Pytest-wrapped tests (moved from module-level calls) ---
 
-# def test_preprocessing_pipeline():
-#     assert_df_from_file(
-#         df=fire_df,
-#         filename=DATA_PROCESSED + "/data_workflow/1_2_incendios_2014-2025.csv",
-#         time_cols=time_cols,
-#         exclude_cols=['start_time']
-#     )
-#     assert_df_from_file(
-#         df=dispatch_df,
-#         filename=DATA_PROCESSED + "/data_workflow/1_2_despachos_2014-2025.csv",
-#         time_cols=time_cols,
-#         numeric_cols=numeric_cols,
-#         exclude_cols=[]
-#     )
+def test_preprocessing_pipeline():
+    assert_df_from_file(
+        df=fire_df,
+        filename=DATA_PROCESSED + "/data_workflow/1_2_incendios_2014-2025.csv",
+        time_cols=time_cols,
+        exclude_cols=['start_time']
+    )
+    assert_df_from_file(
+        df=dispatch_df,
+        filename=DATA_PROCESSED + "/data_workflow/1_2_despachos_2014-2025.csv",
+        time_cols=time_cols,
+        numeric_cols=numeric_cols,
+        exclude_cols=[]
+    )
 
-# def test_feature_engineering_pipeline():
-#     assert_df_from_file(
-#         df=fire_df_fe, 
-#         filename=DATA_PROCESSED + "/data_workflow/2_3_incendios_2014-2025.csv", 
-#         time_cols=time_cols, 
-#         exclude_cols=['control_datetime', 'start_time', "weather_index", "weather_index_full", "initial_fuel" ,"initial_fuel_reduced"],
-#         common_id='fire_id'
-#     )
+def test_feature_engineering_pipeline():
+    assert_df_from_file(
+        df=fire_df_fe, 
+        filename=DATA_PROCESSED + "/data_workflow/2_3_incendios_2014-2025.csv", 
+        time_cols=time_cols, 
+        exclude_cols=['control_datetime', 'start_time', "weather_index", "weather_index_full", "initial_fuel" ,"initial_fuel_reduced"],
+        common_id='fire_id'
+    )
 
-# def test_postprocessing_pipeline():
-#     assert_df_from_file(
-#         df=fire_df_post, 
-#         filename=DATA_PROCESSED + "/data_workflow/3_0_incendios_2014-2025.csv", 
-#         time_cols=time_cols, 
-#         exclude_cols=['control_datetime', 'start_time', "weather_index", "weather_index_full", "initial_fuel" ,"initial_fuel_reduced", "split2", "split3", "zone_alert"],
-#         common_id='fire_id'
-#     )
+def test_postprocessing_pipeline():
+    assert_df_from_file(
+        df=fire_df_post, 
+        filename=DATA_PROCESSED + "/data_workflow/3_0_incendios_2014-2025.csv", 
+        time_cols=time_cols, 
+        exclude_cols=['control_datetime', 'start_time', "weather_index", "weather_index_full", "initial_fuel" ,"initial_fuel_reduced", "split2", "split3", "zone_alert"],
+        common_id='fire_id'
+    )
 
 def test_predictions_matches():
     assert_predictions_match(
