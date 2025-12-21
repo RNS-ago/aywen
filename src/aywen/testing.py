@@ -4,6 +4,7 @@ from pandas.testing import assert_frame_equal
 from aywen.utils import DtypeManager
 import xgboost as xgb
 import numpy as np
+from aywen.evaluating import _add_prediction_to_df
 
 
 logger = logging.getLogger("aywen_logger")
@@ -14,13 +15,13 @@ def assert_df(
         old_df: pd.DataFrame,
         time_cols: list = [],
         numeric_cols: list = [],
-        exclude_cols: list = []
+        exclude_cols: list = [],
+        common_id: str = None
     ) -> None:
     left = new_df.copy()
     right = old_df.copy()
     
     
-
     # common columns
     len_left = len(left.columns)
     len_right = len(right.columns)
@@ -29,6 +30,13 @@ def assert_df(
     logger.info("Common columns: %s", common_cols)
     left = left[common_cols].reset_index(drop=True)
     right = right[common_cols].reset_index(drop=True)
+
+    # common ids
+    if common_id is not None:
+        common_ids = set(left[common_id]).intersection(set(right[common_id]))
+        logger.info("ids new=%s, old=%s, common=%s", len(left), len(right), len(common_ids))
+        left = left[left[common_id].isin(common_ids)].reset_index(drop=True)
+        right = right[right[common_id].isin(common_ids)].reset_index(drop=True)
 
 
     # fixing timestamps columns
@@ -51,7 +59,8 @@ def assert_df_from_file(
         filename : str,
         time_cols: list = [],
         numeric_cols: list = [],
-        exclude_cols: list = []
+        exclude_cols: list = [],
+        common_id: str = None
     ) -> None:
     
     # Read old dataframe
@@ -66,7 +75,7 @@ def assert_df_from_file(
     old_df = mgr.apply(old_df, drop_extras=False, include=include)
 
     # Call assert_df
-    assert_df(df, old_df, time_cols=time_cols, numeric_cols=numeric_cols, exclude_cols=exclude_cols)
+    assert_df(df, old_df, time_cols=time_cols, numeric_cols=numeric_cols, exclude_cols=exclude_cols, common_id=common_id)
 
 
 
@@ -84,7 +93,7 @@ def assert_predictions_match(df, pp_dict, covariates, factor1, factor2):
     f1 = random_row[factor1].values[0]
     f2 = random_row[factor2].values[0]
     model = pp_dict[(f1, f2)]
-    pred_random = random_row['prediction_xgb0'].iloc[0]
+    pred_random = random_row['prediction_xgb'].iloc[0]
 
     # Build df_new from the same row, enforcing the same order & copy
     X_random = random_row[covariates].iloc[0].to_dict()
@@ -93,14 +102,14 @@ def assert_predictions_match(df, pp_dict, covariates, factor1, factor2):
     dnew = xgb.DMatrix(df_new, enable_categorical=True)
     pred_xgb = model.predict(dnew)[0]
 
-     # predict with eval_point_prediction
-    result = eval_point_prediction(df_new, model, covariates, mgr)
+     # predict with _add_prediction_to_df
+    result = _add_prediction_to_df(df=df_new, model=model, covariates=covariates, mgr=mgr, prediction_col="prediction")
     pred_eval = result['prediction']
 
     logger.info("Prediction at random row = %s", pred_random)
     logger.info("Prediction with xgboost = %s", pred_xgb)
-    logger.info("Prediction with eval_point_prediction = %s", pred_eval)
+    logger.info("Prediction with _add_prediction_to_df = %s", pred_eval)
 
     assert pred_random == pred_xgb, "Predictions random vs xgboost do not match!"
-    assert np.isclose(pred_random, pred_eval), "Predictions random vs eval_point_prediction do not match!"
+    assert np.isclose(pred_random, pred_eval), "Predictions random vs _add_prediction_to_df do not match!"
 
